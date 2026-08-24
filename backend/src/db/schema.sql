@@ -1,0 +1,79 @@
+-- TrustMesh off-chain schema.
+-- Everything in this file is DELIBERATELY off-chain: it holds the
+-- human-readable role<->org mapping and any PII, both of which must stay
+-- correctable/erasable under India's DPDP Act — something an immutable
+-- public ledger cannot provide.
+
+CREATE TABLE IF NOT EXISTS users (
+  did_hash        TEXT PRIMARY KEY,          -- keccak256(did), matches DIDRegistry
+  did             TEXT NOT NULL UNIQUE,      -- did:ethr:80002:0x...
+  wallet_address  TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Human-readable role <-> organization mapping. The chain only ever sees a
+-- role hash bound to a wallet address; this table is what lets an admin
+-- correct "Manager, Dept X" -> "Manager, Dept Y" or erase it outright
+-- without touching the immutable on-chain grant/expiry/revocation state.
+CREATE TABLE IF NOT EXISTS role_labels (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  role_hash       TEXT NOT NULL,             -- bytes32 role hash, matches AccessControlRegistry
+  role_name       TEXT NOT NULL,             -- 'Admin' | 'Manager' | 'Auditor' | 'User'
+  org_label       TEXT,                      -- free-text, e.g. "Dept of Computer Science"
+  granted_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL,
+  revoked_at      TIMESTAMPTZ
+);
+
+-- Encrypted PII vault. `ciphertext` holds AES-256-GCM output; `dek_wrapped`
+-- holds the per-record data-encryption-key, itself wrapped with
+-- PII_VAULT_MASTER_KEY. "Erasure" (DPDP Right to Erasure) = deleting the
+-- row here, which orphans any on-chain/IPFS hash that pointed at this data
+-- — the chain itself is never touched or rewritten.
+CREATE TABLE IF NOT EXISTS pii_vault (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  field_name      TEXT NOT NULL,             -- e.g. 'aadhaar_number', 'full_name'
+  ciphertext      BYTEA NOT NULL,
+  iv              BYTEA NOT NULL,
+  auth_tag        BYTEA NOT NULL,
+  dek_wrapped     BYTEA NOT NULL,
+  content_hash    TEXT,                      -- optional link to an on-chain/IPFS pointer this data backs
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS guardians (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  guardian_address TEXT NOT NULL,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recovery_requests (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  proposed_by     TEXT NOT NULL,
+  new_controller  TEXT NOT NULL,
+  votes           TEXT[] NOT NULL DEFAULT '{}',
+  threshold       INTEGER NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | executed | expired
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token           TEXT PRIMARY KEY,
+  wallet_address  TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_nonces (
+  nonce           TEXT PRIMARY KEY,
+  wallet_address  TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  used            BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS idx_role_labels_did_hash ON role_labels(did_hash);
+CREATE INDEX IF NOT EXISTS idx_pii_vault_did_hash ON pii_vault(did_hash);

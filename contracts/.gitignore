@@ -1,0 +1,6 @@
+node_modules
+artifacts
+cache
+typechain-types
+deployed-addresses.json
+.env
