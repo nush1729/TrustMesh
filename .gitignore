@@ -17,6 +17,7 @@ backend/.env
 
 frontend/.next
 frontend/out
+frontend/.env
 frontend/.env.local
 frontend/*.tsbuildinfo
 frontend/next-env.d.ts
