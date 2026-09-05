@@ -29,12 +29,12 @@ export const config = {
   safeLocalMode: process.env.SAFE_LOCAL_MODE === "true",
   localSafeOwnerKeys: [process.env.LOCAL_SAFE_OWNER1_KEY || "", process.env.LOCAL_SAFE_OWNER2_KEY || ""],
 
-  // Using Pinata's JWT REST API rather than web3.storage: web3.storage's
-  // current SDK (w3up-client) requires an interactive DID-based account
-  // setup that doesn't fit a non-interactive backend service, while
-  // Pinata's JWT auth is a single static token — simpler and more
-  // reliable for a hackathon build.
-  pinataJwt: process.env.PINATA_JWT || "",
+  // P3.1: private, self-hosted IPFS (Kubo) replaces the public Pinata SaaS —
+  // documents stay on institution-controlled infrastructure instead of a
+  // closed, foreign-hosted third party. Points at a local Kubo daemon's RPC
+  // API in dev (`ipfs daemon`, default http://127.0.0.1:5001); in production
+  // this points at the institution's own Kubo/IPFS Cluster node.
+  ipfsApiUrl: process.env.IPFS_API_URL || "http://127.0.0.1:5001",
 
   piiVaultMasterKey: process.env.PII_VAULT_MASTER_KEY || "",
 

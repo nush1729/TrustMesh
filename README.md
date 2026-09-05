@@ -146,7 +146,7 @@ Tracked honestly rather than glossed over.
 
 **Backend**
 - An internal security review identified authorization gaps in the identity-recovery and PII-write paths where a caller-supplied identifier was trusted instead of being derived from the authenticated session, and a data-erasure endpoint that executed on a single session rather than a governed multi-party approval. Fixes are scoped and prioritized (P0) — see the project's internal change-management notes.
-- `PINATA_JWT` is unset by default in a fresh checkout — live asset-mint IPFS pinning errors until configured; the pre-seeded local demo asset ships with placeholder metadata so this doesn't block a click-through demo.
+- Asset-mint IPFS upload requires a local Kubo daemon running (`ipfs daemon`) — if it's not running, live asset-mint errors until started; the pre-seeded local demo asset ships with placeholder metadata so this doesn't block a click-through demo.
 - `/verify/:did` derives asset ownership by replaying cached `AssetMinted` / `AssetTransferred` events from an in-memory indexer, not an authoritative on-chain enumeration — `AssetNFT` deliberately doesn't implement `ERC721Enumerable`. Production needs a durable, checkpointed indexer instead.
 - Guardian recovery's on-chain execution and the backend relayer's credential-issuance key are not currently gated by the same multi-party approval as role grants and asset mints — both are flagged for the key-management/governance hardening pass.
 - No backend test suite (unit or integration) — only the 4 smart contracts have tests.
@@ -208,7 +208,7 @@ SAFE_LOCAL_MODE=false
 LOCAL_SAFE_OWNER1_KEY=
 LOCAL_SAFE_OWNER2_KEY=
 
-PINATA_JWT=your_pinata_jwt_here
+IPFS_API_URL=http://127.0.0.1:5001  # local Kubo daemon; production points at a private, self-hosted node
 PII_VAULT_MASTER_KEY=64_char_hex_aes_256_key_here
 SESSION_SECRET=any_long_random_string_here
 ```
