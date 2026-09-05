@@ -62,7 +62,18 @@ export const api = {
   verifyStatus: (did: string) =>
     request<{ roles: string[]; assets: string[]; credentialsValid: boolean }>(`/verify/${encodeURIComponent(did)}`),
 
-  eraseVault: (did: string) => request<{ erased: boolean }>("/vault/erase", { method: "POST", body: JSON.stringify({ did }) }),
+  // P0.3: /vault/erase is now a governed 2-approval request, not an
+  // immediate single-session action — the first Admin call creates a
+  // pending request, a second, distinct Admin session's call executes it.
+  eraseVault: (didHash: string, reason?: string) =>
+    request<{
+      erased: boolean;
+      id: string;
+      status: "pending" | "executed";
+      approvals: number;
+      threshold: number;
+      erasedRows?: number;
+    }>("/vault/erase", { method: "POST", body: JSON.stringify({ didHash, reason }) }),
 
   auditFeed: () => request<{ events: AuditEvent[] }>("/audit/feed"),
 };
