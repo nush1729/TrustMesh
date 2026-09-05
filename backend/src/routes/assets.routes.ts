@@ -1,6 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
-import { requireSession, AuthedRequest } from "../middleware/didAuth.middleware";
+// P0.4: session auth is now enforced by the app-level deny-by-default gate
+// in server.ts — routes no longer individually attach requireSession.
+import { AuthedRequest } from "../middleware/didAuth.middleware";
 import { requireRole } from "../middleware/roleGate.middleware";
 import { assetNFT } from "../services/chain.service";
 import { proposeSafeTransaction } from "../services/safe.service";
@@ -14,7 +16,6 @@ const assetNFTIface = assetNFT.interface;
 
 assetsRouter.post(
   "/mint",
-  requireSession,
   requireRole("Admin"),
   upload.single("file"),
   async (req: AuthedRequest, res) => {
@@ -35,7 +36,7 @@ assetsRouter.post(
   }
 );
 
-assetsRouter.post("/transfer", requireSession, requireRole("Admin"), async (req: AuthedRequest, res) => {
+assetsRouter.post("/transfer", requireRole("Admin"), async (req: AuthedRequest, res) => {
   const { from, to, tokenId } = req.body as { from?: string; to?: string; tokenId?: number };
   if (!from || !to || tokenId === undefined) return res.status(400).json({ error: "from, to, tokenId required." });
 

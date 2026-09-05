@@ -1,5 +1,7 @@
 import { Router } from "express";
-import { requireSession, AuthedRequest } from "../middleware/didAuth.middleware";
+// P0.4: session auth is now enforced by the app-level deny-by-default gate
+// in server.ts — routes no longer individually attach requireSession.
+import { AuthedRequest } from "../middleware/didAuth.middleware";
 import { requireRole } from "../middleware/roleGate.middleware";
 import { accessControlRegistry, ROLE_NAME_TO_HASH } from "../services/chain.service";
 import { proposeSafeTransaction } from "../services/safe.service";
@@ -10,7 +12,7 @@ export const rolesRouter = Router();
 
 const accessControlIface = accessControlRegistry.interface;
 
-rolesRouter.post("/grant", requireSession, requireRole("Admin"), async (req: AuthedRequest, res) => {
+rolesRouter.post("/grant", requireRole("Admin"), async (req: AuthedRequest, res) => {
   const { role, account, expiry, didHash, orgLabel } = req.body as {
     role?: keyof typeof ROLE_NAME_TO_HASH;
     account?: string;
@@ -37,7 +39,7 @@ rolesRouter.post("/grant", requireSession, requireRole("Admin"), async (req: Aut
   res.json({ safeTxHash });
 });
 
-rolesRouter.post("/revoke", requireSession, requireRole("Admin"), async (req: AuthedRequest, res) => {
+rolesRouter.post("/revoke", requireRole("Admin"), async (req: AuthedRequest, res) => {
   const { role, account } = req.body as { role?: keyof typeof ROLE_NAME_TO_HASH; account?: string };
   if (!role || !account || !ROLE_NAME_TO_HASH[role]) {
     return res.status(400).json({ error: "role and account are required." });
@@ -48,7 +50,7 @@ rolesRouter.post("/revoke", requireSession, requireRole("Admin"), async (req: Au
   res.json({ safeTxHash });
 });
 
-rolesRouter.get("/status/:safeTxHash", requireSession, async (req, res) => {
+rolesRouter.get("/status/:safeTxHash", async (req, res) => {
   const { getSafeTransactionStatus } = await import("../services/safe.service");
   const status = await getSafeTransactionStatus(req.params.safeTxHash);
   res.json(status);

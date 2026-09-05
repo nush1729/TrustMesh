@@ -77,3 +77,38 @@ CREATE TABLE IF NOT EXISTS auth_nonces (
 
 CREATE INDEX IF NOT EXISTS idx_role_labels_did_hash ON role_labels(did_hash);
 CREATE INDEX IF NOT EXISTS idx_pii_vault_did_hash ON pii_vault(did_hash);
+
+-- P0.3 fix: ungoverned, unaudited DPDP erasure. `/vault/erase` used to
+-- destroy a citizen's PII on a single Admin session with no second approval
+-- and no audit record — the one truly irreversible action in the system was
+-- the one action NOT gated behind the same 2-of-3 approval every other
+-- destructive action goes through. This table implements an off-chain
+-- 2-approval record (erasure is a DB operation, not a contract call, so it
+-- is not a Gnosis Safe transaction) gating the actual key-destruction call
+-- in vault.service.ts (untouched — see erasure.service.ts, which only ever
+-- CALLS eraseAllForUser once the threshold below is met).
+CREATE TABLE IF NOT EXISTS erasure_requests (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  requested_by    TEXT NOT NULL,
+  reason          TEXT,
+  approvals       TEXT[] NOT NULL DEFAULT '{}',
+  threshold       INTEGER NOT NULL DEFAULT 2,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | executed
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  executed_at     TIMESTAMPTZ
+);
+
+-- Append-only trail of who requested/approved/executed an erasure, and why
+-- — written BEFORE the key is destroyed, since after destruction the event
+-- that caused it is by definition unrecoverable from the vault itself.
+CREATE TABLE IF NOT EXISTS erasure_audit_log (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  erasure_request_id  UUID NOT NULL REFERENCES erasure_requests(id),
+  actor               TEXT NOT NULL,
+  action              TEXT NOT NULL, -- requested | approved | executed
+  reason              TEXT,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_erasure_requests_did_hash ON erasure_requests(did_hash);
