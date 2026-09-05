@@ -24,3 +24,4 @@ frontend/next-env.d.ts
 
 chaincode/trustmesh/dist
 chaincode/trustmesh/dist-test
+backend/.fabric-checkpoint.json

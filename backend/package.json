@@ -9,9 +9,14 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/db/migrate.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:fabric": "vitest run --config vitest.fabric.config.ts",
+    "dev:fabric": "tsx watch src/server.fabric.ts",
+    "start:fabric": "node dist/server.fabric.js"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@hyperledger/fabric-gateway": "^1.12.1",
     "@safe-global/api-kit": "^2.5.6",
     "@safe-global/protocol-kit": "^4.1.1",
     "cookie-parser": "^1.4.7",
@@ -25,6 +30,7 @@
     "express": "^4.21.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
+    "key-did-resolver": "^4.0.0",
     "multer": "^2.0.1",
     "pg": "^8.13.1",
     "uuid": "^11.0.3"
