@@ -21,3 +21,7 @@ frontend/.env
 frontend/.env.local
 frontend/*.tsbuildinfo
 frontend/next-env.d.ts
+
+chaincode/trustmesh/dist
+chaincode/trustmesh/dist-test
+backend/.fabric-checkpoint.json

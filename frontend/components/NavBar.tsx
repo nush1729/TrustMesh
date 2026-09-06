@@ -1,15 +1,16 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
+import Link from 'next/link';
+import { IdentityButton } from '@/components/IdentityGate';
 
 const links = [
-  { href: "/onboard", label: "Onboard" },
-  { href: "/portal", label: "Portal" },
-  { href: "/admin/roles", label: "Admin · Roles" },
-  { href: "/admin/assets", label: "Admin · Assets" },
-  { href: "/verify", label: "Verify" },
-  { href: "/audit", label: "Audit" },
+  { href: '/onboard', label: 'Onboard' },
+  { href: '/portal', label: 'Portal' },
+  { href: '/admin/roles', label: 'Admin · Roles' },
+  { href: '/admin/assets', label: 'Admin · Assets' },
+  { href: '/admin/governance', label: 'Admin · Approvals' },
+  { href: '/verify', label: 'Verify' },
+  { href: '/audit', label: 'Audit' },
 ];
 
 export function NavBar() {
@@ -19,14 +20,15 @@ export function NavBar() {
         <Link href="/" className="text-lg font-bold tracking-wide text-white">
           Trust<span className="text-gold">Mesh</span>
         </Link>
-        <nav className="hidden gap-5 text-sm md:flex">
+        <nav className="hidden gap-4 text-sm lg:flex">
           {links.map((l) => (
             <Link key={l.href} href={l.href} className="text-mist transition hover:text-gold">
               {l.label}
             </Link>
           ))}
         </nav>
-        <ConnectButton showBalance={false} />
+        {/* Replaces RainbowKit's <ConnectButton /> — there is no wallet to connect. */}
+        <IdentityButton />
       </div>
     </header>
   );

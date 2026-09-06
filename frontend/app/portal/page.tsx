@@ -1,36 +1,48 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { useAccount } from "wagmi";
-import { RequireWallet } from "@/components/WalletConnect";
-import { RoleBadge } from "@/components/RoleBadge";
-import { AssetCard, Asset } from "@/components/AssetCard";
-import { api } from "@/lib/api";
+import { useEffect, useState } from 'react';
+import { RequireIdentity } from '@/components/IdentityGate';
+import { RoleBadge } from '@/components/RoleBadge';
+import { AssetCard } from '@/components/AssetCard';
+import { api, AssetRecord } from '@/lib/api';
+import { useIdentity } from '@/lib/identity-context';
 
 export default function PortalPage() {
   return (
-    <RequireWallet>
+    <RequireIdentity>
       <PortalView />
-    </RequireWallet>
+    </RequireIdentity>
   );
 }
 
 function PortalView() {
-  const { address } = useAccount();
+  const { identity } = useIdentity();
   const [roles, setRoles] = useState<string[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!address) return;
-    api
-      .verifyStatus(address)
-      .then((res) => setRoles(res.roles))
-      .finally(() => setLoading(false));
-    // Asset fetching would hit a dedicated /portal/assets route in the full
-    // backend; left as an empty array here since this is a starter scaffold.
-    setAssets([]);
-  }, [address]);
+    if (!identity) return;
+    let cancelled = false;
+
+    (async () => {
+      const status = await api.verifyStatus(identity.did);
+      if (cancelled) return;
+      setRoles(status.roles);
+      // The EVM version left this empty with a comment that a real backend
+      // would need a dedicated route, because AssetNFT.sol was not
+      // enumerable. With CouchDB rich queries the ledger answers "all assets
+      // owned by X" directly, so the portal can actually show them.
+      const owned = await api.assetsFor(status.didHash);
+      if (!cancelled) setAssets(owned.assets);
+    })()
+      .catch(() => undefined)
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [identity]);
 
   return (
     <div className="space-y-8">
@@ -53,12 +65,14 @@ function PortalView() {
 
       <section>
         <h2 className="mb-3 font-semibold text-white">Assets Held</h2>
-        {assets.length === 0 ? (
+        {loading ? (
+          <p className="text-sm text-mist">Loading…</p>
+        ) : assets.length === 0 ? (
           <p className="text-sm text-mist">No assets yet.</p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {assets.map((a) => (
-              <AssetCard key={a.tokenId} asset={a} />
+              <AssetCard key={a.assetId} asset={a} />
             ))}
           </div>
         )}
