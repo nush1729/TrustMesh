@@ -148,8 +148,12 @@ jobs:
         working-directory: contracts
         run: |
           cat > /tmp/export-addresses.js <<'EOF'
-          const a = require('./deployed-addresses.json');
+          // require() resolves relative to THIS file's own location (/tmp),
+          // not the shell's working directory — fs.readFileSync, unlike
+          // require, resolves relative paths against process.cwd(), which
+          // is `contracts/` here (see the working-directory: above).
           const fs = require('fs');
+          const a = JSON.parse(fs.readFileSync('./deployed-addresses.json', 'utf8'));
           const lines = [
             `DID_REGISTRY_ADDRESS=${a.DIDRegistry}`,
             `REVOCATION_REGISTRY_ADDRESS=${a.RevocationRegistry}`,
