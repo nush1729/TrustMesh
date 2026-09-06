@@ -135,3 +135,15 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_did_hash ON notifications(did_hash, created_at DESC);
+
+-- Session/device-change alert (item 3): one row per (did_hash, device
+-- fingerprint) ever seen at login. A fingerprint absent from this table at
+-- login time is, by definition, this DID's first sign-in from that device.
+CREATE TABLE IF NOT EXISTS known_devices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  fingerprint     TEXT NOT NULL, -- sha256(User-Agent + client-generated device id)
+  first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (did_hash, fingerprint)
+);

@@ -92,10 +92,10 @@ export const api = {
   authChallenge: (did: string) =>
     request<{ nonce: string }>('/auth/challenge', { method: 'POST', body: JSON.stringify({ did }) }),
 
-  authVerify: (did: string, signature: string, nonce: string) =>
-    request<{ sessionToken: string; did: string; didHash: string }>('/auth/verify', {
+  authVerify: (did: string, signature: string, nonce: string, deviceId: string) =>
+    request<{ sessionToken: string; did: string; didHash: string; newDevice: boolean }>('/auth/verify', {
       method: 'POST',
-      body: JSON.stringify({ did, signature, nonce }),
+      body: JSON.stringify({ did, signature, nonce, deviceId }),
     }),
 
   me: () => request<{ didHash: string; did: string | null }>('/identity/me'),

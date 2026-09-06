@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
+import { getOrCreateDeviceId } from './device';
 import {
   createIdentity,
   createIdentityWithBackup,
@@ -35,6 +36,9 @@ interface IdentityState {
   session: boolean;
   loading: boolean;
   error: string | null;
+  /** Item 3: true immediately after a login that came from a fingerprint this DID has never used before. */
+  newDevice: boolean;
+  dismissNewDevice: () => void;
   create: () => Promise<void>;
   createWithBackup: (passphrase: string) => Promise<string>;
   restore: (backupJson: string, passphrase: string) => Promise<void>;
@@ -52,6 +56,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [newDevice, setNewDevice] = useState(false);
 
   const refresh = useCallback(async () => {
     const stored = await getPublicIdentity();
@@ -123,10 +128,13 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       if (!stored) throw new Error('Create an identity first.');
       const { nonce } = await api.authChallenge(stored.did);
       const signature = await signMessage(`TrustMesh DID challenge: ${nonce}`);
-      await api.authVerify(stored.did, signature, nonce);
+      const result = await api.authVerify(stored.did, signature, nonce, getOrCreateDeviceId());
       setSession(true);
+      setNewDevice(result.newDevice);
     });
   }, [wrap]);
+
+  const dismissNewDevice = useCallback(() => setNewDevice(false), []);
 
   const create = useCallback(async () => {
     await wrap(async () => {
@@ -184,6 +192,8 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       session,
       loading,
       error,
+      newDevice,
+      dismissNewDevice,
       create,
       createWithBackup,
       restore,
@@ -192,7 +202,22 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       logout,
       forget,
     }),
-    [identity, registered, session, loading, error, create, createWithBackup, restore, register, login, logout, forget]
+    [
+      identity,
+      registered,
+      session,
+      loading,
+      error,
+      newDevice,
+      dismissNewDevice,
+      create,
+      createWithBackup,
+      restore,
+      register,
+      login,
+      logout,
+      forget,
+    ]
   );
 
   return <IdentityContext.Provider value={value}>{children}</IdentityContext.Provider>;
