@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { IdentityButton } from '@/components/IdentityGate';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const links = [
   { href: '/onboard', label: 'Onboard' },
@@ -28,8 +29,11 @@ export function NavBar() {
             </Link>
           ))}
         </nav>
-        {/* Replaces RainbowKit's <ConnectButton /> — there is no wallet to connect. */}
-        <IdentityButton />
+        <div className="flex items-center gap-3">
+          <NotificationBell />
+          {/* Replaces RainbowKit's <ConnectButton /> — there is no wallet to connect. */}
+          <IdentityButton />
+        </div>
       </div>
     </header>
   );

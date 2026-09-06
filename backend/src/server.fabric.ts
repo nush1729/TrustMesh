@@ -22,6 +22,7 @@ import { assetsRouter } from './routes/fabric/assets.routes';
 import { governanceRouter } from './routes/fabric/governance.routes';
 import { identityRouter } from './routes/fabric/identity.routes';
 import { auditRouter, credentialsRouter, recoveryRouter } from './routes/fabric/misc.routes';
+import { notificationsRouter } from './routes/fabric/notifications.routes';
 import { rolesRouter } from './routes/fabric/roles.routes';
 import { verifyRouter } from './routes/fabric/verify.routes';
 import { vaultRouter } from './routes/fabric/vault.routes';
@@ -135,6 +136,8 @@ app.use('/assets', assetsRouter);
 app.use('/governance', governanceRouter);
 app.use('/verify', verifyRouter);
 app.use('/recovery', recoveryRouter);
+// Session-scoped (not in PUBLIC_PATHS above), same deny-by-default gate as everything else.
+app.use('/notifications', notificationsRouter);
 // Untouched by this migration, as required: the vault and its DPDP
 // erasure-by-key-destruction logic are architecture-agnostic.
 app.use('/vault', vaultRouter);
