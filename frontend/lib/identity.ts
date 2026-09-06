@@ -311,13 +311,46 @@ export async function restoreFromBackup(backupJson: string, passphrase: string):
     throw new Error('Could not decrypt the backup. Check the passphrase.');
   }
 
+  // SECURITY: `did` and `publicKeyB64` above travel in the backup as PLAINTEXT,
+  // outside the AES-GCM ciphertext — the authentication tag covers only the
+  // wrapped private key, not these two labels. Trusting them as-is would mean
+  // a backup file tampered with in exactly those two fields (passphrase not
+  // required, since they're never encrypted) restores a real, usable private
+  // key under a DID/public-key label that does not match it. Re-derive both
+  // from the decrypted key material itself and refuse the restore if they
+  // disagree, so a mismatch is caught here rather than surfacing later as a
+  // confusing signature-verification failure at register/login time.
+  const extractablePrivate = await crypto.subtle.importKey(
+    'pkcs8',
+    pkcs8,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
+  const jwk = (await crypto.subtle.exportKey('jwk', extractablePrivate)) as { x: string; y: string };
+  const derivedPublicKey = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  );
+  const derivedPublicKeyB64 = base64Encode(await crypto.subtle.exportKey('spki', derivedPublicKey));
+  const derivedDid = await didKeyFromPublicKey(derivedPublicKey);
+
+  if (derivedDid !== parsed.did || derivedPublicKeyB64 !== parsed.publicKeyB64) {
+    throw new Error(
+      'Backup file is corrupted or has been tampered with: the stated identity does not match its encrypted key.'
+    );
+  }
+
   const privateKey = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
     'sign',
   ]);
 
   const createdAt = new Date().toISOString();
   await tx('readwrite', (store) =>
-    store.put({ id: RECORD_ID, did: parsed.did, publicKeyB64: parsed.publicKeyB64, privateKey, createdAt })
+    store.put({ id: RECORD_ID, did: derivedDid, publicKeyB64: derivedPublicKeyB64, privateKey, createdAt })
   );
-  return { did: parsed.did, publicKeyB64: parsed.publicKeyB64, createdAt };
+  return { did: derivedDid, publicKeyB64: derivedPublicKeyB64, createdAt };
 }
