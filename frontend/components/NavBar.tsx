@@ -13,6 +13,7 @@ const links = [
   { href: '/admin/governance', label: 'Admin · Approvals' },
   { href: '/verify', label: 'Verify' },
   { href: '/audit', label: 'Audit' },
+  { href: '/transparency', label: 'Transparency' },
 ];
 
 export function NavBar() {
