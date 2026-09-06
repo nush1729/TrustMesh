@@ -3,7 +3,7 @@ import * as path from "path";
 import request from "supertest";
 import type { Express } from "express";
 import { config } from "../src/config";
-import { buildDid } from "../src/services/did.service";
+import { buildDid, registerUser } from "../src/services/did.service";
 
 // Test wallets — Hardhat's standard local test accounts (well-known, never
 // used on a real network). Accounts #1/#2 are the local Safe's two owners
@@ -97,6 +97,12 @@ export async function registerDidOnChain(wallet: ethers.Wallet) {
   } catch {
     // already registered — fine for repeated test runs
   }
+  // Mirrors what POST /identity/did does for a real client: the on-chain
+  // call alone leaves no `users` row, and anything with a users(did_hash)
+  // foreign key (e.g. guardians) fails against a genuinely fresh database —
+  // this was previously masked locally by leftover rows from earlier manual
+  // testing, and only surfaced once CI ran against a truly clean Postgres.
+  await registerUser(wallet.address);
 }
 
 /// Full signed-DID-challenge login flow against the app, mirroring exactly
