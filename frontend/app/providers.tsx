@@ -1,22 +1,20 @@
-"use client";
+'use client';
 
-import "@rainbow-me/rainbowkit/styles.css";
-import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider } from "wagmi";
-import { wagmiConfig } from "@/lib/wagmi";
-import { useState } from "react";
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
+import { IdentityProvider } from '@/lib/identity-context';
 
+/**
+ * wagmi + RainbowKit are gone (§6 Phase 4.1). There is no EVM chain to connect
+ * to and no browser wallet in the §4 identity design, so the provider tree is
+ * just react-query plus the WebCrypto identity context.
+ */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider theme={darkTheme({ accentColor: "#F5C518", accentColorForeground: "#000000" })}>
-          {children}
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <QueryClientProvider client={queryClient}>
+      <IdentityProvider>{children}</IdentityProvider>
+    </QueryClientProvider>
   );
 }

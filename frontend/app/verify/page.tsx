@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { api } from "@/lib/api";
+import { useState } from 'react';
+import { api } from '@/lib/api';
+
+type VerifyResult = Awaited<ReturnType<typeof api.verifyStatus>>;
 
 export default function VerifyPage() {
-  const [did, setDid] = useState("");
-  const [result, setResult] = useState<{ roles: string[]; assets: string[]; credentialsValid: boolean } | null>(
-    null
-  );
+  const [did, setDid] = useState('');
+  const [result, setResult] = useState<VerifyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,8 +17,7 @@ export default function VerifyPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await api.verifyStatus(did);
-      setResult(res);
+      setResult(await api.verifyStatus(did.trim()));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -30,16 +29,17 @@ export default function VerifyPage() {
     <div className="mx-auto max-w-lg space-y-6">
       <h1 className="text-2xl font-bold text-white">Verifier Portal</h1>
       <p className="text-sm text-mist">
-        Checks role, ownership, and credential status directly against on-chain state. This endpoint never returns
-        raw PII from the encrypted vault — only status booleans and role/asset identifiers.
+        Checks role and asset ownership directly against ledger state. This endpoint never returns raw personal data
+        from the encrypted vault — only status and identifiers.
       </p>
 
       <div className="flex gap-2">
         <input
           className="flex-1 rounded-lg border border-white/15 bg-ink-800 p-2 font-mono text-xs text-white placeholder:text-mist/50 focus:border-gold focus:outline-none"
-          placeholder="did:ethr:amoy:0x..."
+          placeholder="did:key:z… or a 64-character DID hash"
           value={did}
           onChange={(e) => setDid(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
         />
         <button
           className="rounded-full bg-gold px-4 py-2 text-sm font-semibold text-black hover:opacity-90"
@@ -53,19 +53,30 @@ export default function VerifyPage() {
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {result && (
-        <div className="rounded-xl border border-white/10 bg-ink-800 p-5 text-sm">
+        <div className="space-y-3 rounded-xl border border-white/10 bg-ink-800 p-5 text-sm">
           <p>
-            <span className="font-semibold text-white">Credentials valid:</span>{" "}
-            <span className="text-mist">{result.credentialsValid ? "Yes" : "No"}</span>
+            <span className="font-semibold text-white">DID hash:</span>{' '}
+            <span className="break-all font-mono text-xs text-gold-soft">{result.didHash}</span>
           </p>
-          <p className="mt-2">
-            <span className="font-semibold text-white">Active roles:</span>{" "}
-            <span className="text-mist">{result.roles.length ? result.roles.join(", ") : "none"}</span>
+          <p>
+            <span className="font-semibold text-white">Active roles:</span>{' '}
+            <span className="text-mist">{result.roles.length ? result.roles.join(', ') : 'none'}</span>
           </p>
-          <p className="mt-2">
-            <span className="font-semibold text-white">Assets owned:</span>{" "}
-            <span className="text-mist">{result.assets.length ? result.assets.join(", ") : "none"}</span>
-          </p>
+          <div>
+            <span className="font-semibold text-white">Assets owned:</span>{' '}
+            {result.assets.length === 0 ? (
+              <span className="text-mist">none</span>
+            ) : (
+              <ul className="mt-2 space-y-1">
+                {result.assets.map((a) => (
+                  <li key={a.assetId} className="rounded bg-ink-700 p-2 text-xs">
+                    <span className="text-white">Asset #{a.assetId}</span>
+                    <span className="ml-2 break-all font-mono text-gold-soft">{a.ipfsCID}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

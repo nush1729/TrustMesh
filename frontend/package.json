@@ -10,13 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.90.21",
     "next": "^15.1.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "viem": "^2.45.3",
-    "wagmi": "^2.19.5"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

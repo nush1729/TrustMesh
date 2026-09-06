@@ -18,7 +18,8 @@ const defaults: Record<string, string> = {
   DATABASE_URL: 'postgres://localhost:5432/trustmesh',
   IPFS_API_URL: 'http://127.0.0.1:5001',
   VC_ISSUER_PRIVATE_KEY: '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d',
-  PII_VAULT_MASTER_KEY: 'dev-only-test-master-key-0000000000000000000000000000000000000000',
+  // Must be exactly 32 bytes of hex — vault.service.ts rejects anything else.
+  PII_VAULT_MASTER_KEY: '7e44ac5086b7919ceeaa5968484c88f37fa8fcf06b30abfe66479d860450cb0e',
   FABRIC_CHANNEL_NAME: 'trustmesh',
   FABRIC_CHAINCODE_NAME: 'trustmesh',
   FABRIC_TEST_NETWORK_PATH: path.join(os.homedir(), 'fabric', 'fabric-samples', 'test-network'),

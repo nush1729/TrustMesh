@@ -1,3 +1,11 @@
+// MUST be imported before the routers are defined. Express 4 does not catch
+// rejections from async route handlers: an awaited call that throws becomes an
+// unhandled rejection, which under Node 15+ terminates the process. Every
+// async route in this backend was therefore a remote crash away from taking
+// the whole API down — found while exercising the UI, when a bad vault key
+// killed the server instead of returning a 500. This patch routes async
+// throws into the error handler below, where they belong.
+import 'express-async-errors';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import * as crypto from 'crypto';
@@ -161,6 +169,15 @@ export function assertConfigured() {
 export async function startServer() {
   assertConfigured();
   await pingChaincode();
+
+  // Last-resort net for rejections that originate outside a request — the
+  // event indexer's background stream, for instance. Without this, Node's
+  // default is to terminate, so a transient peer disconnect could take the API
+  // down even though the indexer already knows how to reconnect from its
+  // checkpoint. Logged loudly rather than swallowed silently.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+  });
 
   const server = app.listen(config.port, () => {
     console.log(`TrustMesh backend (Fabric) listening on :${config.port}`);

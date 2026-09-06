@@ -103,3 +103,16 @@ authRouter.post('/verify', async (req, res) => {
   });
   res.json({ sessionToken: token, did, didHash });
 });
+
+/**
+ * Ends the session. Deletes the server-side row rather than only clearing the
+ * cookie, so a token captured earlier cannot be replayed after logout.
+ */
+authRouter.post('/logout', async (req, res) => {
+  const token = req.cookies?.trustmesh_session;
+  if (token) {
+    await query(`DELETE FROM sessions WHERE token = $1`, [hashSessionToken(token)]);
+  }
+  res.clearCookie('trustmesh_session');
+  res.json({ ok: true });
+});

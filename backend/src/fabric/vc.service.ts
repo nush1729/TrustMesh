@@ -1,8 +1,7 @@
 import * as crypto from 'crypto';
 import { ES256KSigner } from 'did-jwt';
 import { createVerifiableCredentialJwt, Issuer, verifyCredential } from 'did-jwt-vc';
-import { Resolver } from 'did-resolver';
-import KeyResolver from 'key-did-resolver';
+import { DIDResolutionResult, Resolver } from 'did-resolver';
 import { fabricConfig } from './config';
 
 /**
@@ -25,10 +24,10 @@ import { fabricConfig } from './config';
  * migration) and is referenced here at most by a content hash.
  */
 
-const resolver = new Resolver(KeyResolver.getResolver());
-
 /** multicodec secp256k1-pub (0xe7), varint-encoded. */
 const SECP256K1_MULTICODEC = Buffer.from([0xe7, 0x01]);
+/** multicodec p256-pub (0x1200), varint-encoded. */
+const P256_MULTICODEC = Buffer.from([0x80, 0x24]);
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function base58btcEncode(bytes: Buffer): string {
@@ -53,6 +52,94 @@ function base58btcEncode(bytes: Buffer): string {
   for (let i = digits.length - 1; i >= 0; i--) out += B58[digits[i]];
   return out;
 }
+
+function base58btcDecode(value: string): Buffer {
+  const bytes: number[] = [0];
+  for (const char of value) {
+    const index = B58.indexOf(char);
+    if (index < 0) throw new Error(`Invalid base58 character '${char}'`);
+    let carry = index;
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58;
+      bytes[i] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  // Leading '1's in base58 encode leading zero bytes.
+  let leadingZeros = 0;
+  for (const char of value) {
+    if (char === B58[0]) leadingZeros++;
+    else break;
+  }
+  return Buffer.from(new Array(leadingZeros).fill(0).concat(bytes.reverse()));
+}
+
+/**
+ * did:key resolver, implemented here rather than pulled from key-did-resolver.
+ *
+ * Two reasons, in order:
+ *   1. key-did-resolver's transitive `multiformats` is ESM-only and does not
+ *      expose the subpaths it imports under CommonJS resolution, so requiring
+ *      it crashes this backend at startup. (It survives a bundler-based test
+ *      runner, which is exactly the kind of works-in-tests//fails-in-prod gap
+ *      worth eliminating rather than working around.)
+ *   2. Resolving did:key is genuinely just decoding the identifier — there is
+ *      no network call, no registry, no chain. Owning ~30 lines is preferable
+ *      to a dependency for something this small, and it makes the "credentials
+ *      verify offline" property obvious in the code.
+ */
+function resolveDidKey(did: string): DIDResolutionResult {
+  const notFound = (error: string): DIDResolutionResult => ({
+    didResolutionMetadata: { error },
+    didDocument: null,
+    didDocumentMetadata: {},
+  });
+
+  const match = /^did:key:(z[1-9A-HJ-NP-Za-km-z]+)$/.exec(did.split('#')[0]);
+  if (!match) return notFound('invalidDid');
+
+  let decoded: Buffer;
+  try {
+    decoded = base58btcDecode(match[1].slice(1));
+  } catch {
+    return notFound('invalidDid');
+  }
+
+  const prefix = decoded.subarray(0, 2);
+  const keyBytes = decoded.subarray(2);
+
+  let type: string;
+  let publicKeyHex: string;
+  if (prefix.equals(SECP256K1_MULTICODEC)) {
+    type = 'EcdsaSecp256k1VerificationKey2019';
+    publicKeyHex = keyBytes.toString('hex');
+  } else if (prefix.equals(P256_MULTICODEC)) {
+    type = 'JsonWebKey2020';
+    publicKeyHex = keyBytes.toString('hex');
+  } else {
+    return notFound('unsupportedKeyType');
+  }
+
+  const id = `${did.split('#')[0]}#${match[1]}`;
+  const controller = did.split('#')[0];
+  return {
+    didResolutionMetadata: { contentType: 'application/did+ld+json' },
+    didDocument: {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: controller,
+      verificationMethod: [{ id, type, controller, publicKeyHex }],
+      authentication: [id],
+      assertionMethod: [id],
+    },
+    didDocumentMetadata: {},
+  };
+}
+
+const resolver = new Resolver({ key: async (did: string) => resolveDidKey(did) });
 
 /**
  * did:key for the issuer's secp256k1 key.

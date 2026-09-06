@@ -8,17 +8,17 @@ const PILLARS = [
   {
     eyebrow: "IDENTITY",
     title: "DID + Verifiable Credentials",
-    body: "Identity is a self-sovereign W3C DID, never a raw NFT or wallet address — the private key never leaves the user's device.",
+    body: "Identity is a self-sovereign W3C did:key, generated in your own browser — no wallet extension, and the private key never leaves your device.",
   },
   {
     eyebrow: "ACCESS CONTROL",
     title: "Lifecycle RBAC",
-    body: "Admin / Manager / Auditor / User roles are on-chain role hashes with expiry and revocation — not a permanent, un-erasable grant.",
+    body: "Admin / Manager / Auditor / User roles are on-ledger role hashes with expiry and revocation — not a permanent, un-erasable grant.",
   },
   {
     eyebrow: "GOVERNANCE",
-    title: "Multi-Sig Only",
-    body: "Every mint, transfer, and role change is proposed to a Gnosis Safe. No single admin key can act alone.",
+    title: "Multi-Party Only",
+    body: "Every mint, transfer, and role change needs 2 of 3 separate organizations to approve — enforced twice over, by the governance chaincode and by the network's own endorsement policy.",
   },
   {
     eyebrow: "PRIVACY",
@@ -27,8 +27,8 @@ const PILLARS = [
   },
   {
     eyebrow: "ASSETS",
-    title: "Governed NFTs",
-    body: "ERC-721 tokens represent real assets only — certificates, equipment, licenses — metadata on IPFS, hash on-chain.",
+    title: "Governed Assets",
+    body: "Assets represent real things only — certificates, equipment, licenses — with documents in the institution's own private storage and only a hash on the ledger.",
   },
   {
     eyebrow: "RESILIENCE",
@@ -117,7 +117,8 @@ export default function Home() {
       </section>
 
       <footer className="mt-24 border-t border-white/10 pt-8 text-center text-xs text-mist">
-        Polygon Amoy Testnet &middot; Prototype (TRL 3&ndash;4) &middot; Built for Smart India Hackathon 2026
+        Hyperledger Fabric (3-organization permissioned network) &middot; Prototype (TRL 3&ndash;4) &middot; Built for
+        Smart India Hackathon 2026
       </footer>
     </div>
   );
