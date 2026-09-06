@@ -1,8 +1,10 @@
+import * as crypto from 'crypto';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../../db/client';
 import { getController } from '../../fabric/did.service';
 import { didToHash, isDidKey, verifySignature } from '../../fabric/identity';
+import { notifyNewDeviceLogin } from '../../fabric/notifications.service';
 import { generateSessionToken, hashSessionToken } from '../../utils/session-token';
 
 export const authRouter = Router();
@@ -49,7 +51,12 @@ authRouter.post('/challenge', async (req, res) => {
 });
 
 authRouter.post('/verify', async (req, res) => {
-  const { did, signature, nonce } = req.body as { did?: string; signature?: string; nonce?: string };
+  const { did, signature, nonce, deviceId } = req.body as {
+    did?: string;
+    signature?: string;
+    nonce?: string;
+    deviceId?: string;
+  };
   if (!did || !signature || !nonce) {
     return res.status(400).json({ error: 'did, signature, nonce required.' });
   }
@@ -86,6 +93,48 @@ authRouter.post('/verify', async (req, res) => {
 
   await query(`UPDATE auth_nonces SET used = true WHERE nonce = $1`, [nonce]);
 
+  // Item 3: session/device-change alert. The fingerprint is a hash of the
+  // User-Agent header plus a client-generated random id the frontend stores
+  // in localStorage (frontend/lib/device.ts) — nothing invasive, no real
+  // device-fingerprinting library, and no PII: neither input identifies a
+  // person, only "this browser instance, roughly". A fingerprint this DID has
+  // never authenticated with before is, by construction, a new device for it.
+  //
+  // A missing/absent deviceId (an older client, or a request that stripped
+  // it) still hashes to SOME fingerprint and is treated the same way — worst
+  // case it always reads as "new", which fails safe (an extra flagged login)
+  // rather than silently never flagging anything.
+  const userAgent = req.headers['user-agent'] || '';
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(`${userAgent}::${deviceId || ''}`, 'utf8')
+    .digest('hex');
+
+  const knownRows = await query<{ did_hash: string }>(
+    `SELECT did_hash FROM known_devices WHERE did_hash = $1 AND fingerprint = $2`,
+    [didHash, fingerprint]
+  );
+  const newDevice = knownRows.length === 0;
+
+  if (newDevice) {
+    // Legitimate users are never locked out for a hackathon demo — the login
+    // proceeds regardless. This only ever ADDS a flag/notification, never a
+    // block.
+    await query(
+      `INSERT INTO known_devices (did_hash, fingerprint) VALUES ($1, $2)
+       ON CONFLICT (did_hash, fingerprint) DO NOTHING`,
+      [didHash, fingerprint]
+    );
+    await notifyNewDeviceLogin(didHash).catch((err) =>
+      console.error('[notifications] failed to notify new-device login:', (err as Error).message)
+    );
+  } else {
+    await query(`UPDATE known_devices SET last_seen_at = now() WHERE did_hash = $1 AND fingerprint = $2`, [
+      didHash,
+      fingerprint,
+    ]);
+  }
+
   // Stage 1 P1.2: the client's token is a CSPRNG value; only its hash persists.
   const token = generateSessionToken();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -101,7 +150,7 @@ authRouter.post('/verify', async (req, res) => {
     secure: process.env.NODE_ENV === 'production',
     expires: expiresAt,
   });
-  res.json({ sessionToken: token, did, didHash });
+  res.json({ sessionToken: token, did, didHash, newDevice });
 });
 
 /**

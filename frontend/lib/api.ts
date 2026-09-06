@@ -92,10 +92,10 @@ export const api = {
   authChallenge: (did: string) =>
     request<{ nonce: string }>('/auth/challenge', { method: 'POST', body: JSON.stringify({ did }) }),
 
-  authVerify: (did: string, signature: string, nonce: string) =>
-    request<{ sessionToken: string; did: string; didHash: string }>('/auth/verify', {
+  authVerify: (did: string, signature: string, nonce: string, deviceId: string) =>
+    request<{ sessionToken: string; did: string; didHash: string; newDevice: boolean }>('/auth/verify', {
       method: 'POST',
-      body: JSON.stringify({ did, signature, nonce }),
+      body: JSON.stringify({ did, signature, nonce, deviceId }),
     }),
 
   me: () => request<{ didHash: string; did: string | null }>('/identity/me'),
@@ -213,4 +213,19 @@ export const api = {
       '/recovery/vote',
       { method: 'POST', body: JSON.stringify({ requestId }) }
     ),
+
+  // --- notifications (mocked channel — see backend/src/fabric/notifications.service.ts) --------
+  notifications: () => request<{ notifications: NotificationRecord[] }>('/notifications'),
+  markNotificationsRead: () => request<{ ok: boolean }>('/notifications/read', { method: 'POST' }),
+};
+
+export type NotificationRecord = {
+  id: string;
+  did_hash: string;
+  type: 'RECOVERY_PROPOSED' | 'RECOVERY_VOTE' | 'RECOVERY_EXECUTED' | 'NEW_DEVICE_LOGIN';
+  channel: string;
+  subject: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
 };

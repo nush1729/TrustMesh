@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { RequireIdentity } from '@/components/IdentityGate';
 import { RoleBadge } from '@/components/RoleBadge';
 import { AssetCard } from '@/components/AssetCard';
+import { DidQrCode } from '@/components/DidQrCode';
 import { api, AssetRecord } from '@/lib/api';
 import { useIdentity } from '@/lib/identity-context';
 
@@ -47,6 +48,12 @@ function PortalView() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-white">Your Portal</h1>
+
+      {identity && (
+        <section className="flex justify-center">
+          <DidQrCode did={identity.did} />
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 font-semibold text-white">Roles</h2>

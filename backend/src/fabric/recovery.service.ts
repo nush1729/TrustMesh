@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db/client';
 import { proposeApproveExecute } from './governance.service';
+import { notifyRecoveryExecuted, notifyRecoveryProposed, notifyRecoveryVote } from './notifications.service';
 
 /**
  * Guardian-based social recovery — replaces services/recovery.service.ts.
@@ -59,6 +60,16 @@ export async function proposeRecovery(didHash: string, proposedBy: string, newCo
      VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
     [id, didHash, proposedBy, newControllerPublicKey, [proposedBy], threshold]
   );
+
+  // Item 1 (guardian notifications): alert the actual DID owner the moment a
+  // recovery is opened against their identity, before any further votes can
+  // land. Awaited so the notification is guaranteed durable by the time this
+  // call returns (useful for demos/tests), but a notification failure must
+  // never fail the recovery proposal itself, so errors are swallowed here.
+  await notifyRecoveryProposed(didHash, proposedBy, id).catch((err) =>
+    console.error('[notifications] failed to notify recovery-proposed:', (err as Error).message)
+  );
+
   return { requestId: id, threshold, votes: 1 };
 }
 
@@ -81,6 +92,13 @@ export async function voteRecovery(requestId: string, guardianId: string) {
   const votes = Array.from(new Set([...request.votes, guardianId]));
   await query(`UPDATE recovery_requests SET votes = $1 WHERE id = $2`, [votes, requestId]);
 
+  // Item 1: every vote — not just the one that reaches threshold — alerts the
+  // real DID owner, so a hijack-in-progress is visible as it accumulates
+  // votes rather than only once it is too late to stop.
+  await notifyRecoveryVote(request.did_hash, guardianId, votes.length, request.threshold).catch((err) =>
+    console.error('[notifications] failed to notify recovery-vote:', (err as Error).message)
+  );
+
   if (votes.length >= request.threshold) {
     // Guardian threshold met off-chain; the on-chain re-binding is still a
     // governed, multi-organization action rather than a single key's write.
@@ -89,6 +107,9 @@ export async function voteRecovery(requestId: string, guardianId: string) {
       newControllerPublicKey: request.new_controller,
     });
     await query(`UPDATE recovery_requests SET status = 'executed' WHERE id = $1`, [requestId]);
+    await notifyRecoveryExecuted(request.did_hash, proposal.proposalId).catch((err) =>
+      console.error('[notifications] failed to notify recovery-executed:', (err as Error).message)
+    );
     return { status: 'executed', votes: votes.length, proposalId: proposal.proposalId };
   }
 

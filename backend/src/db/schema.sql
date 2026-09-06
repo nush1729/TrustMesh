@@ -112,3 +112,38 @@ CREATE TABLE IF NOT EXISTS erasure_audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erasure_requests_did_hash ON erasure_requests(did_hash);
+
+-- Guardian-notification feature: alerts the actual DID owner when a recovery
+-- is proposed/voted for their identity, and when a login is seen from a
+-- device that has never authenticated for that DID before.
+--
+-- DELIVERY IS MOCKED. There is no SendGrid/Twilio/etc. configured in this
+-- project (by design — no new paid external dependencies), so "sending" a
+-- notification means writing a durable row here that a real provider would
+-- otherwise have delivered as an email/SMS. See
+-- backend/src/fabric/notifications.service.ts for where a real provider
+-- would plug in (one function, `dispatchNotification`).
+CREATE TABLE IF NOT EXISTS notifications (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash    TEXT NOT NULL REFERENCES users(did_hash), -- the DID this notification is ABOUT/FOR
+  type        TEXT NOT NULL,   -- 'RECOVERY_PROPOSED' | 'RECOVERY_VOTE' | 'RECOVERY_EXECUTED' | 'NEW_DEVICE_LOGIN'
+  channel     TEXT NOT NULL DEFAULT 'mock', -- always 'mock' until a real provider is wired in
+  subject     TEXT NOT NULL,   -- what a real email's subject line / SMS preview would say
+  body        TEXT NOT NULL,   -- the full mocked message body
+  read_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_did_hash ON notifications(did_hash, created_at DESC);
+
+-- Session/device-change alert (item 3): one row per (did_hash, device
+-- fingerprint) ever seen at login. A fingerprint absent from this table at
+-- login time is, by definition, this DID's first sign-in from that device.
+CREATE TABLE IF NOT EXISTS known_devices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  did_hash        TEXT NOT NULL REFERENCES users(did_hash),
+  fingerprint     TEXT NOT NULL, -- sha256(User-Agent + client-generated device id)
+  first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (did_hash, fingerprint)
+);

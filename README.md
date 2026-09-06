@@ -171,7 +171,7 @@ Tracked honestly rather than glossed over.
 
 - Guardian recovery requires at least two guardians to ever be votable to completion — with exactly one guardian, `Math.ceil(1/2)+1 = 2` can never be reached by a single vote, so recovery silently deadlocks. This is documented in `backend/src/fabric/recovery.service.ts` and the Recovery page now says so explicitly, but the flow doesn't yet hard-block adding only one guardian.
 - No rate limiting, request throttling, or other production API hardening has been added yet.
-- No CI pipeline runs the Fabric backend tests (`backend/test/fabric/`), `tsc --noEmit`, or `next build` on push.
+- `.github/workflows/ci.yml` runs on every push/PR to `main`: the 14 Hardhat contract tests, the EVM backend suite (against a real locally-deployed Gnosis Safe, spun up fresh per run), `frontend` `tsc --noEmit` + `next build`, and — for the Fabric backend — `tsc --noEmit` plus the one Fabric test file with no live-network dependency. The governed-flow Fabric tests (`backend/test/fabric/p0*`, `p1*`, `p3.1*`) still do NOT run in CI: they need a live 3-org Hyperledger Fabric network (Docker-in-Docker peers/orderer/CAs + generated MSP material via fabric-samples), which is too heavy/flaky for a shared GitHub-hosted runner. They're exercised locally against the live network instead — see the CI job's own comments for the full reasoning.
 - No mobile-responsiveness or accessibility (GIGW) pass has been done on the frontend.
 - The chaincode and governance design have not had a formal, independent security audit — passing unit/integration checks (`./fabric/verify-chaincode.sh`) is coverage, not an audit.
 
