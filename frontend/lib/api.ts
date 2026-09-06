@@ -191,4 +191,26 @@ export const api = {
       threshold: number;
       erasedRows?: number;
     }>('/vault/erase', { method: 'POST', body: JSON.stringify({ didHash, reason }) }),
+
+  // --- guardian recovery ---------------------------------------------------------
+  // `guardianId` and `didHash` throughout are DID hashes (the same identifier
+  // shown elsewhere as "Subject (DID hash)"), never a body-supplied identity
+  // for the CALLER — the backend derives that from the session.
+  addGuardian: (guardianId: string) =>
+    request<{ added: boolean; didHash: string }>('/recovery/guardians', {
+      method: 'POST',
+      body: JSON.stringify({ guardianId }),
+    }),
+
+  proposeRecovery: (didHash: string, newControllerPublicKey: string) =>
+    request<{ requestId: string; threshold: number; votes: number }>('/recovery/propose', {
+      method: 'POST',
+      body: JSON.stringify({ didHash, newControllerPublicKey }),
+    }),
+
+  voteRecovery: (requestId: string) =>
+    request<{ status: 'pending' | 'executed'; votes: number; threshold?: number; proposalId?: string }>(
+      '/recovery/vote',
+      { method: 'POST', body: JSON.stringify({ requestId }) }
+    ),
 };

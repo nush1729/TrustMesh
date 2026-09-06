@@ -6,6 +6,7 @@ import { IdentityButton } from '@/components/IdentityGate';
 const links = [
   { href: '/onboard', label: 'Onboard' },
   { href: '/portal', label: 'Portal' },
+  { href: '/recovery', label: 'Recovery' },
   { href: '/admin/roles', label: 'Admin · Roles' },
   { href: '/admin/assets', label: 'Admin · Assets' },
   { href: '/admin/governance', label: 'Admin · Approvals' },

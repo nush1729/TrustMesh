@@ -45,7 +45,14 @@ export async function proposeRecovery(didHash: string, proposedBy: string, newCo
     throw new Error('Only a registered guardian may propose recovery.');
   }
 
-  const threshold = Math.ceil(guardians.length / 2) + 1; // majority-plus-one, e.g. 2-of-3
+  // majority-plus-one (e.g. 2-of-3, 3-of-4). NOTE: with exactly one guardian
+  // this evaluates to 2, which no single-guardian vote count can ever reach —
+  // a lone guardian can propose but recovery can never execute. That is
+  // intentional (one guardian is one person able to unilaterally rebind the
+  // DID, the exact single-point-of-compromise this feature exists to avoid),
+  // but it means the UI/onboarding must steer users toward at least two
+  // guardians rather than silently accepting one.
+  const threshold = Math.ceil(guardians.length / 2) + 1;
   const id = uuidv4();
   await query(
     `INSERT INTO recovery_requests (id, did_hash, proposed_by, new_controller, votes, threshold, status)
