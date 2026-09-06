@@ -76,7 +76,10 @@ function AddGuardianCard() {
   }
 
   return (
-    <Card title="Add a guardian" description="Register someone you trust to vote on recovering your own identity.">
+    <Card
+      title="Add a guardian"
+      description="Register someone you trust to vote on recovering your own identity. Add at least two — with only one guardian, a recovery vote can never reach threshold and can never execute."
+    >
       <label className="block text-sm text-mist">
         Guardian&rsquo;s DID hash
         <input
