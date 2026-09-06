@@ -6,7 +6,7 @@ import { NewDeviceBanner } from "@/components/NewDeviceBanner";
 
 export const metadata: Metadata = {
   title: "TrustMesh",
-  description: "Privacy-preserving, DPDP-compliant identity, RBAC & digital-asset custody platform — Team Aegis, SIH PS 26125",
+  description: "Privacy-preserving, DPDP-compliant identity, RBAC & digital-asset custody platform — Team Meow, SIH PS 26125",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

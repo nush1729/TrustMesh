@@ -53,7 +53,7 @@ export default function Home() {
         <div className="pointer-events-none absolute inset-0 bg-glow-gold-soft" />
         <div className="relative">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-gold">
-            Team Aegis &middot; SIH PS 26125
+            Team Meow &middot; SIH PS 26125
           </div>
           <h1 className="mx-auto max-w-3xl text-4xl font-bold leading-tight sm:text-6xl">
             <TextType text="Identity and assets," />
