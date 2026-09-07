@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../../db/client';
+import { fabricConfig } from '../../fabric/config';
 import { getController } from '../../fabric/did.service';
 import { didToHash, isDidKey, verifySignature } from '../../fabric/identity';
 import { notifyNewDeviceLogin } from '../../fabric/notifications.service';
@@ -147,7 +148,9 @@ authRouter.post('/verify', async (req, res) => {
   res.cookie('trustmesh_session', token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // TM-07 fix: resolved once in fabric/config.ts and asserted at boot,
+    // rather than inferred inline from NODE_ENV per request.
+    secure: fabricConfig.cookieSecure,
     expires: expiresAt,
   });
   res.json({ sessionToken: token, did, didHash, newDevice });

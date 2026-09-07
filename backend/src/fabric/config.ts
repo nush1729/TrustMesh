@@ -89,6 +89,16 @@ export const fabricConfig = {
 
   /** secp256k1 key (hex) the backend issues Verifiable Credentials with. */
   vcIssuerPrivateKey: process.env.VC_ISSUER_PRIVATE_KEY || '',
+
+  /**
+   * TM-07 fix: the session cookie's `Secure` flag used to be `NODE_ENV ===
+   * 'production'` inline in auth.routes.ts — a silent default that a
+   * misconfigured deployment (NODE_ENV never actually set to "production")
+   * would fail into insecurely rather than fail loudly. It is now an
+   * explicit setting, resolved once here and asserted at boot (see
+   * assertFabricConfigured below) rather than inferred per-request.
+   */
+  cookieSecure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
 } as const;
 
 export const ORG_KEYS: OrgKey[] = ['org1', 'org2', 'org3'];
@@ -113,5 +123,23 @@ export function assertFabricConfigured(): void {
         );
       }
     }
+  }
+
+  // TM-07 fix: a MISSPELLED or unexpected NODE_ENV value (e.g. 'staging',
+  // 'produciton') is what previously fell through to an insecure cookie
+  // silently. An UNSET NODE_ENV is deliberately treated the same as
+  // 'development' here — that is Node's own long-standing convention, and
+  // every local dev tool this project uses (tsx watch, vitest) leaves it
+  // unset — so this must not require every local `npm run dev:fabric` to
+  // suddenly set an env var it never needed before. Only a NODE_ENV that is
+  // explicitly set to something unrecognized must now explicitly decide
+  // COOKIE_SECURE for itself, rather than being silently trusted either way.
+  const nodeEnv = process.env.NODE_ENV;
+  const knownSafeEnv = nodeEnv === undefined || nodeEnv === 'development' || nodeEnv === 'test';
+  if (!knownSafeEnv && process.env.COOKIE_SECURE === undefined && nodeEnv !== 'production') {
+    throw new Error(
+      `NODE_ENV is '${nodeEnv}', not 'development'/'test'/'production' — ` +
+        'refusing to guess whether this deployment is served over HTTPS. Set COOKIE_SECURE=true or COOKIE_SECURE=false explicitly.'
+    );
   }
 }

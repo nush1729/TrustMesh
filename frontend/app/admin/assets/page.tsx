@@ -20,12 +20,17 @@ function AssetAdminFlow() {
   const [modalOpen, setModalOpen] = useState(false);
   const [cid, setCid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // TM-05: the backend now refuses an upload with no explicit encryption
+  // declaration — this checkbox is the UI's side of that, and it gates the
+  // button itself so a plaintext PII document can never reach the private
+  // Kubo store by omission.
+  const [confirmedSafe, setConfirmedSafe] = useState(false);
 
   async function handleMint() {
-    if (!to || !file) return;
+    if (!to || !file || !confirmedSafe) return;
     setError(null);
     try {
-      const res = await api.mintAsset(to, file);
+      const res = await api.mintAsset(to, file, true);
       setCid(res.ipfsCID);
       setProposalId(res.proposalId);
       setModalOpen(true);
@@ -62,10 +67,21 @@ function AssetAdminFlow() {
           />
         </label>
 
+        <label className="flex items-start gap-2 text-xs text-mist">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={confirmedSafe}
+            onChange={(e) => setConfirmedSafe(e.target.checked)}
+          />
+          I confirm this document is either encrypted or contains no personal data — required before it can be
+          stored (IPFS content is effectively permanent and never confidential on its own).
+        </label>
+
         <button
           className="w-full rounded-full bg-gold py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-40"
           onClick={handleMint}
-          disabled={!to || !file}
+          disabled={!to || !file || !confirmedSafe}
         >
           Propose Mint
         </button>

@@ -1,8 +1,10 @@
 import * as crypto from 'crypto';
 import type { Express } from 'express';
 import request from 'supertest';
+import { OrgKey } from '../../src/fabric/config';
 import { didKeyFromPublicKey, didToHash, ROLE_NAME_TO_HASH, RoleName } from '../../src/fabric/identity';
 import { proposeApproveExecute } from '../../src/fabric/governance.service';
+import { assignOrgToDid } from '../../src/fabric/org-membership.service';
 
 /**
  * Test helpers for the Fabric stack.
@@ -82,10 +84,26 @@ export async function loginAs(app: Express, citizen: TestCitizen) {
  * only the HTTP layer's requireRole('Admin') gate, which is exactly what a
  * real deployment's founding organizations would do out-of-band.
  */
-export async function bootstrapRole(roleName: RoleName, subjectDidHash: string, ttlSeconds = 365 * 24 * 60 * 60) {
+export async function bootstrapRole(
+  roleName: RoleName,
+  subjectDidHash: string,
+  ttlSeconds = 365 * 24 * 60 * 60,
+  /**
+   * TM-01 regression coverage: an Admin this helper creates must be bound to
+   * exactly one organization (mirroring fabric/bootstrap.ts), or
+   * /governance/approve will correctly refuse to let them approve anything at
+   * all — see org-membership.service.ts. Tests that need a SECOND organization
+   * to approve a proposal must bootstrap a SECOND, distinct Admin assigned to
+   * a different org, never reuse one Admin across multiple `org` values.
+   */
+  org: OrgKey = 'org1'
+) {
   await proposeApproveExecute('GRANT_ROLE', {
     roleId: ROLE_NAME_TO_HASH[roleName],
     subject: subjectDidHash,
     expiry: Math.floor(Date.now() / 1000) + ttlSeconds,
   });
+  if (roleName === 'Admin') {
+    await assignOrgToDid(subjectDidHash, org);
+  }
 }

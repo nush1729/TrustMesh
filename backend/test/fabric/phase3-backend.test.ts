@@ -38,20 +38,33 @@ import { bootstrapRole, loginAs, newCitizen, registerCitizen, TestCitizen } from
 let admin: TestCitizen;
 let citizen: TestCitizen;
 let adminAgent: request.SuperAgentTest;
+// TM-01 regression fixture: a SECOND, distinct Admin bound to a DIFFERENT
+// organization. After the fix, /governance/approve derives the approving org
+// from the caller's own recorded assignment — one admin can never stand in
+// for a second organization, so every test below that needs a genuine second
+// approval uses admin2Agent, never adminAgent again with a different `org`.
+let admin2: TestCitizen;
+let admin2Agent: request.SuperAgentTest;
 
 beforeAll(async () => {
   await pingChaincode();
   startIndexer();
 
   admin = newCitizen();
+  admin2 = newCitizen();
   citizen = newCitizen();
 
   await registerCitizen(app, admin);
+  await registerCitizen(app, admin2);
   await registerCitizen(app, citizen);
 
-  // Genesis governance action — see helpers.bootstrapRole.
-  await bootstrapRole('Admin', admin.didHash);
+  // Genesis governance action — see helpers.bootstrapRole. Each admin is
+  // bound to a distinct organization, exactly as fabric/bootstrap.ts now
+  // requires for any real Admin provisioning.
+  await bootstrapRole('Admin', admin.didHash, undefined, 'org1');
+  await bootstrapRole('Admin', admin2.didHash, undefined, 'org2');
   adminAgent = await loginAs(app, admin);
+  admin2Agent = await loginAs(app, admin2);
 }, 180_000);
 
 afterAll(async () => {
@@ -229,7 +242,7 @@ describe('roles routes', () => {
     // Not active yet — one organization has approved.
     expect(await hasActiveRole('Manager', subject.didHash)).toBe(false);
 
-    const approve = await adminAgent.post('/governance/approve').send({ proposalId, org: 'org3' });
+    const approve = await admin2Agent.post('/governance/approve').send({ proposalId });
     expect(approve.status).toBe(200);
 
     const exec = await adminAgent.post('/governance/execute').send({ proposalId });
@@ -248,10 +261,72 @@ describe('roles routes', () => {
 
     const revoke = await adminAgent.post('/roles/revoke').send({ role: 'Auditor', subject: subject.didHash });
     expect(revoke.status).toBe(200);
-    await adminAgent.post('/governance/approve').send({ proposalId: revoke.body.proposalId, org: 'org2' });
+    await admin2Agent.post('/governance/approve').send({ proposalId: revoke.body.proposalId });
     await adminAgent.post('/governance/execute').send({ proposalId: revoke.body.proposalId });
 
     expect(await hasActiveRole('Auditor', subject.didHash)).toBe(false);
+  });
+
+  // TM-01 regression: this is the exact exploit the audit found, run against
+  // the live HTTP route. Before the fix, a single Admin session could pick
+  // any `org` value on /governance/approve and satisfy the 2-of-3 quorum
+  // entirely alone. After the fix, the org is derived server-side from the
+  // caller's own recorded organization — org1 approving is a no-op repeat of
+  // its own auto-approval, never a stand-in for a second organization.
+  it('TM-01: a single Admin cannot satisfy the governance quorum alone', async () => {
+    const subject = newCitizen();
+    await registerCitizen(app, subject);
+
+    const grant = await adminAgent
+      .post('/roles/grant')
+      .send({ role: 'Manager', subject: subject.didHash, expiry: Math.floor(Date.now() / 1000) + 3600 });
+    expect(grant.status).toBe(200);
+    const { proposalId } = grant.body as { proposalId: string };
+
+    // The SAME admin who proposed (and was auto-approved as org1) tries to
+    // approve again through the HTTP route. The route no longer accepts an
+    // `org` override, so it resolves to org1 again — the chaincode's own
+    // "organization already approved" guard must reject this, and the
+    // proposal must NOT execute.
+    const selfApprove = await adminAgent.post('/governance/approve').send({ proposalId });
+    expect(selfApprove.status).toBe(400);
+
+    const exec = await adminAgent.post('/governance/execute').send({ proposalId });
+    expect(exec.status).toBe(400);
+    expect(await hasActiveRole('Manager', subject.didHash)).toBe(false);
+
+    // A genuinely different organization's admin can still approve it —
+    // proving this is a real fix, not a broken feature.
+    const realApprove = await admin2Agent.post('/governance/approve').send({ proposalId });
+    expect(realApprove.status).toBe(200);
+    const realExec = await adminAgent.post('/governance/execute').send({ proposalId });
+    expect(realExec.status).toBe(200);
+    expect(await hasActiveRole('Manager', subject.didHash)).toBe(true);
+  });
+
+  // TM-01 regression: an Admin who was never assigned an organization (e.g. a
+  // role granted directly via chaincode/CLI without going through
+  // fabric/bootstrap.ts's org-assignment step) must be refused, not silently
+  // defaulted to some org.
+  it('TM-01: refuses to approve for an Admin with no recorded organization', async () => {
+    const subject = newCitizen();
+    await registerCitizen(app, subject);
+    // Grants the ledger role directly, WITHOUT calling assignOrgToDid — the
+    // off-chain org_admins row is deliberately never created here.
+    await bootstrapRole('Admin', subject.didHash);
+    // Manually clear the row bootstrapRole's default 'org1' assignment would
+    // have created, to simulate an Admin who was never provisioned an org.
+    const { query } = await import('../../src/db/client');
+    await query('DELETE FROM org_admins WHERE did_hash = $1', [subject.didHash]);
+
+    const unassignedAgent = await loginAs(app, subject);
+    const grant = await adminAgent
+      .post('/roles/grant')
+      .send({ role: 'User', subject: citizen.didHash, expiry: Math.floor(Date.now() / 1000) + 3600 });
+
+    const res = await unassignedAgent.post('/governance/approve').send({ proposalId: grant.body.proposalId });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not provisioned/i);
   });
 });
 
@@ -263,11 +338,12 @@ describe('assets routes (governed mint over real IPFS)', () => {
     const mint = await adminAgent
       .post('/assets/mint')
       .field('to', owner.didHash)
+      .field('encrypted', 'true')
       .attach('file', Buffer.from('trustmesh phase 3 asset payload'), 'asset.txt');
     expect(mint.status).toBe(200);
     expect(mint.body.ipfsCID).toBeTruthy();
 
-    await adminAgent.post('/governance/approve').send({ proposalId: mint.body.proposalId, org: 'org2' });
+    await admin2Agent.post('/governance/approve').send({ proposalId: mint.body.proposalId });
     await adminAgent.post('/governance/execute').send({ proposalId: mint.body.proposalId });
 
     // CouchDB rich query — the EVM stack could not answer this authoritatively.
@@ -280,6 +356,52 @@ describe('assets routes (governed mint over real IPFS)', () => {
     expect(listed.body.assets.length).toBeGreaterThan(0);
   });
 
+  // TM-05 regression: no silent default. Omitting the field entirely must be
+  // rejected outright — it must never be treated as an implicit "false" (i.e.
+  // "safe to store as plaintext").
+  it('TM-05: refuses to mint without an explicit encrypted declaration', async () => {
+    const owner = newCitizen();
+    await registerCitizen(app, owner);
+    const res = await adminAgent
+      .post('/assets/mint')
+      .field('to', owner.didHash)
+      .attach('file', Buffer.from('undeclared payload'), 'undeclared.txt');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/encrypted/i);
+  });
+
+  // TM-01 regression, asset-mint variant of section 28's "critical governance
+  // attack test": the same single Admin who minted (auto-approved as their own
+  // org) must not be able to manufacture the second approval themselves,
+  // regardless of which `org` value they send.
+  it('TM-01: a single Admin cannot self-approve an asset mint into existence', async () => {
+    const owner = newCitizen();
+    await registerCitizen(app, owner);
+
+    const mint = await adminAgent
+      .post('/assets/mint')
+      .field('to', owner.didHash)
+      .field('encrypted', 'true')
+      .attach('file', Buffer.from('attack payload'), 'attack.txt');
+    expect(mint.status).toBe(200);
+    const { proposalId } = mint.body as { proposalId: string };
+
+    for (const forgedOrg of ['org2', 'org3']) {
+      const attempt = await adminAgent.post('/governance/approve').send({ proposalId, org: forgedOrg });
+      expect(attempt.status).toBe(400);
+    }
+    const exec = await adminAgent.post('/governance/execute').send({ proposalId });
+    expect(exec.status).toBe(400);
+
+    // Ledger state must remain unchanged: no asset was actually minted.
+    expect((await assetsByOwner(owner.didHash)).length).toBe(0);
+
+    // A genuinely distinct organization's admin still can approve it.
+    await admin2Agent.post('/governance/approve').send({ proposalId });
+    await adminAgent.post('/governance/execute').send({ proposalId });
+    expect((await assetsByOwner(owner.didHash)).length).toBe(1);
+  });
+
   it('transfers custody only through governance, and records provenance', async () => {
     const from = newCitizen();
     const to = newCitizen();
@@ -289,8 +411,9 @@ describe('assets routes (governed mint over real IPFS)', () => {
     const mint = await adminAgent
       .post('/assets/mint')
       .field('to', from.didHash)
+      .field('encrypted', 'true')
       .attach('file', Buffer.from('transferable asset'), 'asset2.txt');
-    await adminAgent.post('/governance/approve').send({ proposalId: mint.body.proposalId, org: 'org2' });
+    await admin2Agent.post('/governance/approve').send({ proposalId: mint.body.proposalId });
     await adminAgent.post('/governance/execute').send({ proposalId: mint.body.proposalId });
 
     const assetId = (await assetsByOwner(from.didHash))[0].assetId;
@@ -299,7 +422,7 @@ describe('assets routes (governed mint over real IPFS)', () => {
       .post('/assets/transfer')
       .send({ from: from.didHash, to: to.didHash, assetId });
     expect(transfer.status).toBe(200);
-    await adminAgent.post('/governance/approve').send({ proposalId: transfer.body.proposalId, org: 'org3' });
+    await admin2Agent.post('/governance/approve').send({ proposalId: transfer.body.proposalId });
     await adminAgent.post('/governance/execute').send({ proposalId: transfer.body.proposalId });
 
     expect((await assetsByOwner(to.didHash)).some((a) => a.assetId === assetId)).toBe(true);
@@ -405,6 +528,34 @@ describe('recovery.service (governed controller re-binding)', () => {
     expect(res.status).toBe(200);
     expect(res.body.didHash).toBe(attacker.didHash);
     expect(res.body.didHash).not.toBe(victim.didHash);
+  });
+
+  // TM-02 re-verification: UPDATE_CONTROLLER (the DID-hijack governance
+  // action) is only ever proposed from recovery.service.ts's voteRecovery,
+  // via the internal proposeApproveExecute helper — it never leaves a PENDING
+  // proposal reachable through the (now-fixed) /governance/approve route.
+  // Holding the Admin role grants NO special power here: only a DID's own
+  // guardians, registered by that DID's own controller, can ever move a
+  // recovery forward. This test proves an Admin who is not a guardian cannot
+  // propose or vote a victim's recovery — confirming TM-01's fix did not need
+  // to (and does not need to) touch this path for it to already be safe.
+  it('TM-02: an Admin with no guardian relationship cannot propose or vote a victim’s recovery', async () => {
+    const victim = newCitizen();
+    const legitGuardian = newCitizen();
+    await registerCitizen(app, victim);
+    await registerCitizen(app, legitGuardian);
+    const victimAgent = await loginAs(app, victim);
+    await victimAgent.post('/recovery/guardians').send({ guardianId: legitGuardian.didHash });
+
+    const rotated = newCitizen();
+    const proposeAsAdmin = await adminAgent
+      .post('/recovery/propose')
+      .send({ didHash: victim.didHash, newControllerPublicKey: rotated.publicKeyB64 });
+    expect(proposeAsAdmin.status).toBe(400);
+    expect(proposeAsAdmin.body.error).toMatch(/registered guardian/i);
+
+    // The ledger's controller must be completely unaffected by the attempt.
+    expect(await getController(victim.didHash)).toBe(victim.publicKeyB64);
   });
 });
 

@@ -78,6 +78,20 @@ CREATE TABLE IF NOT EXISTS auth_nonces (
 CREATE INDEX IF NOT EXISTS idx_role_labels_did_hash ON role_labels(did_hash);
 CREATE INDEX IF NOT EXISTS idx_pii_vault_did_hash ON pii_vault(did_hash);
 
+-- TM-01 fix: binds an Admin's session to the ONE Fabric organization they are
+-- entitled to submit governance approvals as. Before this table existed,
+-- POST /governance/approve accepted an `org` parameter straight from the
+-- request body — since the backend colocates all three organizations' Fabric
+-- identities (a documented single-machine demo affordance), any single Admin
+-- session could pick a second organization for itself and satisfy the 2-of-3
+-- quorum entirely alone. This table is what /governance/approve now consults
+-- instead of trusting the client (see fabric/org-membership.service.ts).
+CREATE TABLE IF NOT EXISTS org_admins (
+  did_hash    TEXT PRIMARY KEY REFERENCES users(did_hash),
+  org_key     TEXT NOT NULL CHECK (org_key IN ('org1', 'org2', 'org3')),
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- P0.3 fix: ungoverned, unaudited DPDP erasure. `/vault/erase` used to
 -- destroy a citizen's PII on a single Admin session with no second approval
 -- and no audit record — the one truly irreversible action in the system was

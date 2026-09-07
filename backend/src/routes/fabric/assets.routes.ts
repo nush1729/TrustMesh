@@ -21,14 +21,22 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
  */
 
 assetsRouter.post('/mint', requireRole('Admin'), upload.single('file'), async (req: AuthedRequest, res) => {
-  const { to } = req.body as { to?: string };
+  const { to, encrypted } = req.body as { to?: string; encrypted?: string };
   const file = req.file;
   if (!to || !file) return res.status(400).json({ error: 'to (DID hash) and file are required.' });
-
-  // NOTE: if this document contains PII, encrypt it via vault.service BEFORE
-  // calling uploadFileToIpfs. Content-addressed storage provides integrity and
-  // availability, never confidentiality (Final Solution §8).
-  const { cid, contentHash } = await uploadFileToIpfs(file.buffer, file.originalname);
+  // TM-05 fix: the caller (admin console) must explicitly declare whether
+  // this file is already encrypted or is known to be PII-free — silence is
+  // no longer treated as "safe to upload as plaintext". Content-addressed
+  // storage provides integrity and availability, never confidentiality
+  // (Final Solution §8), so an unencrypted PII-bearing document must never
+  // reach it without someone consciously asserting that's acceptable.
+  if (encrypted !== 'true' && encrypted !== 'false') {
+    return res.status(400).json({
+      error:
+        "encrypted (\"true\" or \"false\") is required: state whether this file is pre-encrypted, or explicitly confirm it contains no PII.",
+    });
+  }
+  const { cid, contentHash } = await uploadFileToIpfs(file.buffer, file.originalname, encrypted === 'true');
 
   const proposal = await proposeAction('MINT_ASSET', { owner: to, ipfsCID: cid, contentHash });
 

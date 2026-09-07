@@ -8,6 +8,7 @@ import {
   putState,
   requireArg,
   stableStringify,
+  txEpochMillis,
   txTimestamp,
 } from './util';
 import * as registry from './registry';
@@ -52,6 +53,15 @@ import * as registry from './registry';
  * control whose entire purpose is cross-institutional separation of duties.
  */
 export const GOVERNANCE_THRESHOLD = 2;
+
+/**
+ * TM-08: a PENDING proposal that is never approved/executed used to sit
+ * forever, remaining live, approvable and executable indefinitely — a stale
+ * proposal from months ago is a needless standing attack surface. 7 days
+ * comfortably covers real inter-organizational approval latency while
+ * bounding how long a forgotten proposal stays actionable.
+ */
+export const PROPOSAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Required params per action, validated at propose time rather than at execute time. */
 const REQUIRED_PARAMS: Record<ActionType, string[]> = {
@@ -116,6 +126,7 @@ export class GovernanceContract extends Contract {
       proposedBy: proposer.signer,
       proposedByMsp: proposer.mspId,
       proposedAt: now,
+      expiresAt: new Date(txEpochMillis(ctx) + PROPOSAL_TTL_MS).toISOString(),
       threshold: GOVERNANCE_THRESHOLD,
       approvals: [proposer],
       status: 'PENDING',
@@ -142,6 +153,9 @@ export class GovernanceContract extends Contract {
     if (proposal.status !== 'PENDING') {
       throw new Error(`Governance: proposal is ${proposal.status}, cannot approve`);
     }
+    if (proposal.expiresAt && txEpochMillis(ctx) > Date.parse(proposal.expiresAt)) {
+      throw new Error('Governance: proposal has expired, cannot approve');
+    }
     const mspId = callerMsp(ctx);
     if (proposal.approvals.some((a) => a.mspId === mspId)) {
       throw new Error(`Governance: organization ${mspId} has already approved this proposal`);
@@ -162,6 +176,9 @@ export class GovernanceContract extends Contract {
     const proposal = await this.mustGetProposal(ctx, requireArg('proposalId', proposalId));
     if (proposal.status !== 'PENDING') {
       throw new Error(`Governance: proposal is already ${proposal.status}`);
+    }
+    if (proposal.expiresAt && txEpochMillis(ctx) > Date.parse(proposal.expiresAt)) {
+      throw new Error('Governance: proposal has expired, cannot execute');
     }
 
     const distinctOrgs = new Set(proposal.approvals.map((a) => a.mspId));
