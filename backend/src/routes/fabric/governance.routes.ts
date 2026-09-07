@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { OrgKey, ORG_KEYS, fabricConfig } from '../../fabric/config';
+import { ORG_KEYS, fabricConfig } from '../../fabric/config';
 import { AuthedRequest, requireRole } from '../../fabric/auth.middleware';
+import { getOrgForDidHash } from '../../fabric/org-membership.service';
 import {
   approveProposal,
   cancelProposal,
@@ -25,14 +26,6 @@ export const governanceRouter = Router();
  * Approvals remain individually attributable: the chaincode records the
  * approving organization's MSP ID and the signing certificate's CN.
  */
-
-function parseOrg(value: unknown): OrgKey {
-  const key = String(value ?? '') as OrgKey;
-  if (!ORG_KEYS.includes(key)) {
-    throw new Error(`org must be one of: ${ORG_KEYS.join(', ')}`);
-  }
-  return key;
-}
 
 /** The approval queue — pending proposals awaiting a second organization. */
 governanceRouter.get('/pending', async (_req, res) => {
@@ -62,21 +55,41 @@ governanceRouter.get('/:proposalId', async (req, res) => {
 /**
  * One organization's approval.
  *
- * `org` selects which organization's MSP identity signs. In production each
- * organization runs its own backend holding only its own identity and this
- * parameter does not exist; the prototype colocates all three so the full
- * 2-of-3 flow is demonstrable on one machine (see fabric/config.ts).
+ * TM-01. Which organization's MSP identity signs is derived from the SESSION,
+ * never from the request body. It used to be an `org` field the caller chose,
+ * which meant one authenticated Admin could approve the same proposal as
+ * `org1` and then again as `org2` and single-handedly clear a threshold whose
+ * entire purpose is that two separate institutions must consent. The chaincode
+ * rejects a repeat approval from the same MSP, so it faithfully enforced
+ * "two distinct orgs" — the backend was simply lying to it about which org was
+ * calling. The binding now lives in `org_admins`, seeded out-of-band at
+ * genesis (see fabric/bootstrap.ts and fabric/org-membership.service.ts).
+ *
+ * In production each organization runs its own backend holding only its own
+ * identity, and the question this lookup answers does not arise; the prototype
+ * colocates all three so the full 2-of-3 flow is demonstrable on one machine
+ * (see fabric/config.ts).
  */
 governanceRouter.post('/approve', requireRole('Admin'), async (req: AuthedRequest, res) => {
-  const { proposalId, org } = req.body as { proposalId?: string; org?: string };
+  const { proposalId } = req.body as { proposalId?: string };
   if (!proposalId) return res.status(400).json({ error: 'proposalId required.' });
   try {
-    res.json(await approveProposal(proposalId, parseOrg(org)));
+    const org = await getOrgForDidHash(req.didHash!);
+    res.json(await approveProposal(proposalId, org));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
 });
 
+/**
+ * Execute an already-thresholded proposal.
+ *
+ * Deliberately left on `executeProposal`'s default (`fabricConfig.primaryOrg`):
+ * unlike /approve, execution grants no consent and adds no approval — the
+ * chaincode re-counts distinct approving MSPs itself and refuses to dispatch
+ * below threshold. Any valid identity may submit that transaction, so there is
+ * nothing here for a caller-chosen org to subvert.
+ */
 governanceRouter.post('/execute', requireRole('Admin'), async (req: AuthedRequest, res) => {
   const { proposalId } = req.body as { proposalId?: string };
   if (!proposalId) return res.status(400).json({ error: 'proposalId required.' });

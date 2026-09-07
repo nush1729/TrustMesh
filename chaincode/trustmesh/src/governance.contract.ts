@@ -8,6 +8,7 @@ import {
   putState,
   requireArg,
   stableStringify,
+  txEpochMillis,
   txTimestamp,
 } from './util';
 import * as registry from './registry';
@@ -53,6 +54,20 @@ import * as registry from './registry';
  */
 export const GOVERNANCE_THRESHOLD = 2;
 
+/**
+ * How long a proposal stays actionable (TM-08). A pending proposal is standing
+ * authorization waiting for one more organization; leaving it open forever
+ * means an approval given today can be combined with one given a year from now
+ * to execute an action nobody currently intends. Seven days is long enough for
+ * a second organization to act deliberately and short enough that a stale
+ * proposal must be re-proposed — and re-justified — rather than resurrected.
+ *
+ * Callers may shorten it per proposal via ProposeAction's optional
+ * `ttlSeconds`; they may not lengthen it past this ceiling, or the control
+ * would be caller-defeatable.
+ */
+export const PROPOSAL_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 /** Required params per action, validated at propose time rather than at execute time. */
 const REQUIRED_PARAMS: Record<ActionType, string[]> = {
   GRANT_ROLE: ['roleId', 'subject', 'expiry'],
@@ -77,10 +92,18 @@ export class GovernanceContract extends Contract {
    * The proposer's own approval is recorded immediately, mirroring the Safe
    * design where proposing implies signing. A 2-of-3 proposal therefore needs
    * exactly one further organization to approve.
+   *
+   * `ttlSeconds` is optional and clamped to PROPOSAL_TTL_SECONDS; omit it (or
+   * pass an empty string) for the default window.
    */
   @Transaction()
   @Returns('string')
-  public async ProposeAction(ctx: Context, actionType: string, paramsJson: string): Promise<string> {
+  public async ProposeAction(
+    ctx: Context,
+    actionType: string,
+    paramsJson: string,
+    ttlSeconds?: string
+  ): Promise<string> {
     requireArg('actionType', actionType);
     if (!ACTION_TYPES.includes(actionType as ActionType)) {
       throw new Error(`Governance: unknown actionType '${actionType}'`);
@@ -116,6 +139,7 @@ export class GovernanceContract extends Contract {
       proposedBy: proposer.signer,
       proposedByMsp: proposer.mspId,
       proposedAt: now,
+      expiresAt: new Date(txEpochMillis(ctx) + this.resolveTtlSeconds(ttlSeconds) * 1000).toISOString(),
       threshold: GOVERNANCE_THRESHOLD,
       approvals: [proposer],
       status: 'PENDING',
@@ -142,6 +166,7 @@ export class GovernanceContract extends Contract {
     if (proposal.status !== 'PENDING') {
       throw new Error(`Governance: proposal is ${proposal.status}, cannot approve`);
     }
+    this.requireNotExpired(ctx, proposal, 'approve');
     const mspId = callerMsp(ctx);
     if (proposal.approvals.some((a) => a.mspId === mspId)) {
       throw new Error(`Governance: organization ${mspId} has already approved this proposal`);
@@ -163,6 +188,7 @@ export class GovernanceContract extends Contract {
     if (proposal.status !== 'PENDING') {
       throw new Error(`Governance: proposal is already ${proposal.status}`);
     }
+    this.requireNotExpired(ctx, proposal, 'execute');
 
     const distinctOrgs = new Set(proposal.approvals.map((a) => a.mspId));
     if (distinctOrgs.size < proposal.threshold) {
@@ -243,6 +269,43 @@ export class GovernanceContract extends Contract {
   }
 
   // --- internals ---------------------------------------------------------------
+
+  /**
+   * Rejects an action on a proposal past its window (TM-08).
+   *
+   * Checked on BOTH approve and execute, not just execute: an approval
+   * recorded after expiry would be a real signature on a dead proposal, and
+   * leaving it in `approvals` would make an audit of who consented to what
+   * misleading even though the execute path would have refused anyway.
+   *
+   * The status is deliberately left PENDING rather than flipped to EXPIRED —
+   * a read-only-in-effect check needs no write, and mutating state here would
+   * make every query of an old proposal a transaction.
+   */
+  private requireNotExpired(ctx: Context, proposal: ProposalRecord, verb: string): void {
+    // Proposals written before this field existed have no expiry to enforce;
+    // treating a missing value as "expired" would strand them permanently.
+    if (!proposal.expiresAt) return;
+    const expiresAt = Date.parse(proposal.expiresAt);
+    if (Number.isNaN(expiresAt)) {
+      throw new Error(`Governance: proposal ${proposal.proposalId} has an unreadable expiresAt`);
+    }
+    if (txEpochMillis(ctx) > expiresAt) {
+      throw new Error(
+        `Governance: proposal ${proposal.proposalId} expired at ${proposal.expiresAt} and can no longer be ${verb}d — propose it again`
+      );
+    }
+  }
+
+  /** Optional caller TTL, clamped to the ceiling and never longer than it. */
+  private resolveTtlSeconds(ttlSeconds?: string): number {
+    if (ttlSeconds === undefined || String(ttlSeconds).trim() === '') return PROPOSAL_TTL_SECONDS;
+    const requested = Number(ttlSeconds);
+    if (!Number.isFinite(requested) || requested <= 0) {
+      throw new Error('Governance: ttlSeconds must be a positive number of seconds');
+    }
+    return Math.min(Math.floor(requested), PROPOSAL_TTL_SECONDS);
+  }
 
   private async mustGetProposal(ctx: Context, proposalId: string): Promise<ProposalRecord> {
     const proposal = await getState<ProposalRecord>(ctx, proposalKey(ctx, proposalId));

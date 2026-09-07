@@ -140,6 +140,16 @@ export interface ProposalRecord {
   proposedBy: string;
   proposedByMsp: string;
   proposedAt: string;
+  /**
+   * ISO-8601 instant after which this proposal can no longer be approved or
+   * executed (TM-08). Without it a proposal sat PENDING forever: a grant
+   * proposed under one set of circumstances could be dug up and executed
+   * months later by whoever eventually supplied the second approval, with no
+   * fresh consent from the proposer and no chance for the situation that
+   * justified it to be re-examined. Derived from the transaction timestamp,
+   * never a wall clock, so every endorsing peer computes the same value.
+   */
+  expiresAt: string;
   threshold: number;
   approvals: Approval[];
   status: ProposalStatus;

@@ -147,3 +147,18 @@ CREATE TABLE IF NOT EXISTS known_devices (
   last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (did_hash, fingerprint)
 );
+
+-- TM-01 fix: governance quorum bypass. `/governance/approve` used to take the
+-- approving organization from the REQUEST BODY, so any single authenticated
+-- Admin could satisfy the 2-of-3 threshold alone by approving once as `org1`
+-- and again as `org2` — the whole cross-institutional separation of duties
+-- collapsed to 1-of-1. This table is the missing binding between "an
+-- authenticated citizen" and "which organization they are entitled to approve
+-- as". The org is now derived server-side from the session's DID hash and is
+-- no longer caller-supplied. Seeded only by fabric/bootstrap.ts, the same
+-- out-of-band genesis path that grants the founding Admin role.
+CREATE TABLE IF NOT EXISTS org_admins (
+  did_hash   TEXT PRIMARY KEY REFERENCES users(did_hash),
+  org_key    TEXT NOT NULL CHECK (org_key IN ('org1','org2','org3')),
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
