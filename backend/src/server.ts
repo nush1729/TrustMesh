@@ -1,10 +1,9 @@
 import express from "express";
-// BRIDGE NOTE: the EVM server never had this — every async route handler
-// that threw before P0.4 simply hung the request forever (an unhandled
+// The EVM server never had this — every async route handler that throws
+// before reaching P0.4's gate hangs the request forever (an unhandled
 // promise rejection Express 4 does not forward to error middleware on its
-// own), rather than the clean 500 assertChainConfigured's callers expect.
-// server.fabric.ts already imports this; pulling it in here too surfaced a
-// real hang while wiring the identity/auth bridge routes.
+// own), rather than a clean 500. server.fabric.ts already imports this;
+// pulling it in here too closes the same gap on the EVM entrypoint.
 import "express-async-errors";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -44,12 +43,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 // allowlisted below. `requireRole(...)` calls in individual route files are
 // a separate, still-necessary check (on-chain role, not just "has a
 // session") and are unaffected.
-// BRIDGE NOTE: "/identity/did" and "/auth/logout" added to the allowlist —
-// see routes/identity.routes.ts and routes/auth.routes.ts bridge notes.
-// Registration is necessarily a pre-session step (mirrors
-// routes/fabric/identity.routes.ts's identical reasoning); logout should
-// never itself require a live session to call.
-const CITIZEN_SESSION_ALLOWLIST = new Set(["/health", "/auth/challenge", "/auth/verify", "/auth/logout", "/identity/did"]);
+const CITIZEN_SESSION_ALLOWLIST = new Set(["/health", "/auth/challenge", "/auth/verify"]);
 // `/verify/:did` is intentionally public, but by a DELIBERATE, SEPARATE
 // design decision — it serves verifier ORGANIZATIONS, not citizen sessions,
 // and is not meant to be folded into the 3-entry citizen allowlist above
