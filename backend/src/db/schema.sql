@@ -161,3 +161,24 @@ CREATE TABLE IF NOT EXISTS known_devices (
   last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (did_hash, fingerprint)
 );
+
+-- V2 fix (unencrypted asset documents): the wrapped per-file DEK, IV and auth
+-- tag for every asset document, so /assets/:assetId/document can decrypt what
+-- POST /assets/mint encrypted before it ever reached IPFS.
+--
+-- Keyed by `ipfs_cid`, not the chaincode-assigned `asset_id`: MINT_ASSET is a
+-- governance PROPOSAL (see governance.contract.ts) — the asset doesn't exist
+-- on the ledger, and no assetId is assigned, until a second organization
+-- approves and someone executes it, which can happen long after (and by a
+-- different session than) the /assets/mint call that did the encrypting. The
+-- IPFS CID, by contrast, is content-addressed and known the instant the
+-- ciphertext is uploaded. GET /assets/:assetId/document resolves assetId ->
+-- ipfsCID via GetAsset() on the ledger, then looks up this table by CID.
+CREATE TABLE IF NOT EXISTS asset_encryption_keys (
+  ipfs_cid      TEXT PRIMARY KEY,
+  wrapped_dek   BYTEA NOT NULL,
+  iv            BYTEA NOT NULL,
+  auth_tag      BYTEA NOT NULL,
+  uploaded_by   TEXT NOT NULL REFERENCES users(did_hash),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);

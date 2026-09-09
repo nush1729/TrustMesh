@@ -14,6 +14,25 @@ function ipfsAddUrl(): string {
   return `${config.ipfsApiUrl}/api/v0/add`;
 }
 
+function ipfsCatUrl(cid: string): string {
+  return `${config.ipfsApiUrl}/api/v0/cat?arg=${encodeURIComponent(cid)}`;
+}
+
+/// V2 fix: reads raw bytes back from the private Kubo node by CID. Added
+/// alongside the asset-document encryption fix (routes/fabric/assets.routes.ts,
+/// fabric/asset-encryption.service.ts) so GET /assets/:assetId/document can
+/// fetch the (encrypted) bytes server-side and decrypt them before ever
+/// returning anything to a caller — the same node the audit queried directly
+/// with `/api/v0/cat` to prove the plaintext-retrieval exploit.
+export async function fetchFromIpfs(cid: string): Promise<Buffer> {
+  const res = await fetch(ipfsCatUrl(cid), { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Kubo cat failed: ${res.status} ${await res.text()}`);
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 async function addToIpfs(blob: Blob, fileName: string): Promise<string> {
   const form = new FormData();
   form.append("file", blob, fileName);
