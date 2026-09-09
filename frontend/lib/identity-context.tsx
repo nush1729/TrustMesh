@@ -39,6 +39,16 @@ interface IdentityState {
   /** Item 3: true immediately after a login that came from a fingerprint this DID has never used before. */
   newDevice: boolean;
   dismissNewDevice: () => void;
+  /**
+   * Overnight pass (nav role-visibility fix): the caller's own active
+   * on-ledger roles, e.g. `['Admin']` or `['User']`. Sourced from the same
+   * public `GET /verify/:did` call `refresh()` already makes to determine
+   * `registered` — no extra request. Empty until that call resolves
+   * (`loading` is true, or the DID isn't registered yet).
+   */
+  roles: string[];
+  isAdmin: boolean;
+  isAuditor: boolean;
   create: () => Promise<void>;
   createWithBackup: (passphrase: string) => Promise<string>;
   restore: (backupJson: string, passphrase: string) => Promise<void>;
@@ -57,6 +67,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newDevice, setNewDevice] = useState(false);
+  const [roles, setRoles] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     const stored = await getPublicIdentity();
@@ -64,15 +75,19 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
     if (!stored) {
       setRegistered(false);
       setSession(false);
+      setRoles([]);
       return;
     }
     // Is this DID already anchored on the ledger? The public verifier route
-    // answers without needing a session.
+    // answers without needing a session, and also hands back the caller's own
+    // active roles — reused for nav role-visibility, no extra request.
     try {
-      await api.verifyStatus(stored.did);
+      const status = await api.verifyStatus(stored.did);
       setRegistered(true);
+      setRoles(status.roles);
     } catch {
       setRegistered(false);
+      setRoles([]);
     }
     // Do we still hold a valid session cookie?
     try {
@@ -194,6 +209,9 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       error,
       newDevice,
       dismissNewDevice,
+      roles,
+      isAdmin: roles.includes('Admin'),
+      isAuditor: roles.includes('Auditor'),
       create,
       createWithBackup,
       restore,
@@ -210,6 +228,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       error,
       newDevice,
       dismissNewDevice,
+      roles,
       create,
       createWithBackup,
       restore,

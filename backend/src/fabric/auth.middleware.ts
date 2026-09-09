@@ -80,3 +80,24 @@ export function requireRole(roleName: RoleName) {
     next();
   };
 }
+
+/**
+ * Same LIVE LEDGER role check as requireRole, but satisfied by ANY of the
+ * given roles — e.g. an endpoint that both Admin and Auditor should reach.
+ * Checks are independent live reads (not cached off each other), same as
+ * requireRole; the request proceeds as soon as one role check succeeds.
+ */
+export function requireAnyRole(roleNames: RoleName[]) {
+  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    if (!req.didHash) return res.status(401).json({ error: 'Not authenticated.' });
+
+    for (const roleName of roleNames) {
+      if (await hasActiveRole(roleName, req.didHash)) {
+        return next();
+      }
+    }
+    return res.status(403).json({
+      error: `Requires an active on-ledger ${roleNames.join(' or ')} role.`,
+    });
+  };
+}
