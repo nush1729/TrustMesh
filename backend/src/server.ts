@@ -1,127 +1,231 @@
-import express from "express";
-// BRIDGE NOTE: the EVM server never had this — every async route handler
-// that threw before P0.4 simply hung the request forever (an unhandled
-// promise rejection Express 4 does not forward to error middleware on its
-// own), rather than the clean 500 assertChainConfigured's callers expect.
-// server.fabric.ts already imports this; pulling it in here too surfaced a
-// real hang while wiring the identity/auth bridge routes.
-import "express-async-errors";
-import cors from "cors";
-import cookieParser from "cookie-parser";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import * as crypto from "crypto";
-import { config, assertChainConfigured } from "./config";
-import { authRouter } from "./routes/auth.routes";
-import { identityRouter } from "./routes/identity.routes";
-import { credentialsRouter } from "./routes/credentials.routes";
-import { rolesRouter } from "./routes/roles.routes";
-import { assetsRouter } from "./routes/assets.routes";
-import { verifyRouter } from "./routes/verify.routes";
-import { recoveryRouter } from "./routes/recovery.routes";
-import { vaultRouter } from "./routes/vault.routes";
-import { auditRouter } from "./routes/audit.routes";
-import { startIndexerPolling } from "./services/indexer.service";
-import { requireSession } from "./middleware/didAuth.middleware";
+// MUST be imported before the routers are defined. Express 4 does not catch
+// rejections from async route handlers: an awaited call that throws becomes an
+// unhandled rejection, which under Node 15+ terminates the process. Every
+// async route in this backend was therefore a remote crash away from taking
+// the whole API down — found while exercising the UI, when a bad vault key
+// killed the server instead of returning a 500. This patch routes async
+// throws into the error handler below, where they belong.
+import 'express-async-errors';
+import cookieParser from 'cookie-parser';
+import cors from 'cors';
+import * as crypto from 'crypto';
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import { config } from './config';
+import { assertFabricConfigured, fabricConfig } from './fabric/config';
+import { requireSession } from './fabric/auth.middleware';
+import { closeGateways, pingChaincode } from './fabric/gateway';
+import { startIndexer } from './fabric/indexer.service';
+import { authRouter } from './routes/fabric/auth.routes';
+import { assetsRouter } from './routes/fabric/assets.routes';
+import { governanceRouter } from './routes/fabric/governance.routes';
+import { identityRouter } from './routes/fabric/identity.routes';
+import { auditRouter, credentialsRouter, recoveryRouter } from './routes/fabric/misc.routes';
+import { notificationsRouter } from './routes/fabric/notifications.routes';
+import { transparencyRouter } from './routes/fabric/transparency.routes';
+import { rolesRouter } from './routes/fabric/roles.routes';
+import { verifyRouter } from './routes/fabric/verify.routes';
+import { vaultRouter } from './routes/fabric/vault.routes';
+
+/**
+ * TrustMesh backend — the only backend entrypoint.
+ *
+ * This began life as server.fabric.ts, running beside the original
+ * EVM/Solidity/Gnosis-Safe entrypoint so both stacks could build and test side
+ * by side during the migration. That cutover is now complete: the EVM backend
+ * has been retired and this file took over its name.
+ *
+ * Why it was retired rather than kept as a fallback: the citizen identity model
+ * moved to did:key + WebCrypto P-256, so an authenticated principal is a DID
+ * hash rather than an Ethereum address. The EVM stack was only half-migrated to
+ * that — routes/recovery.routes.ts still called buildDid() on the session
+ * principal, and roleGate.middleware.ts still passed it to an on-chain
+ * hasActiveRole(role, address) — so every role-gated EVM route threw on a
+ * 64-character hash where a 20-byte address was expected. Its on-chain RBAC
+ * keyed roles by address and there are no addresses any more, so making it
+ * consistent again needed either a contract change or a second identity model.
+ * A "fallback" whose authorization does not work is worse than not having one.
+ *
+ * Every Stage 1 hardening measure is carried over deliberately, not by
+ * accident of copying: deny-by-default auth (P0.4), helmet and rate limiting
+ * (P1.1/P0.5), hashed session tokens with nonce expiry (P1.2), a sanitized
+ * error handler (P1.3), and fail-fast boot configuration checks (P1.4).
+ */
 
 export const app = express();
 
-// P1.1: standard API hardening — security headers, x-powered-by removed.
-app.disable("x-powered-by");
+// Stage 1 P1.1: security headers, x-powered-by removed.
+app.disable('x-powered-by');
 app.use(helmet());
 
 app.use(cors({ origin: config.frontendOrigin, credentials: true }));
 app.use(cookieParser());
 app.use(express.json());
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true, chain: 'hyperledger-fabric' }));
 
-// ---- P0.4: deny-by-default authentication gate ----
-// Previously every route file had to individually remember to attach
-// requireSession — a structural risk, since a new route that forgets it is
-// silently public. This single app-level gate runs before every route
-// handler and requires a valid session UNLESS the path is explicitly
-// allowlisted below. `requireRole(...)` calls in individual route files are
-// a separate, still-necessary check (on-chain role, not just "has a
-// session") and are unaffected.
-// BRIDGE NOTE: "/identity/did" and "/auth/logout" added to the allowlist —
-// see routes/identity.routes.ts and routes/auth.routes.ts bridge notes.
-// Registration is necessarily a pre-session step (mirrors
-// routes/fabric/identity.routes.ts's identical reasoning); logout should
-// never itself require a live session to call.
-const CITIZEN_SESSION_ALLOWLIST = new Set(["/health", "/auth/challenge", "/auth/verify", "/auth/logout", "/identity/did"]);
-// `/verify/:did` is intentionally public, but by a DELIBERATE, SEPARATE
-// design decision — it serves verifier ORGANIZATIONS, not citizen sessions,
-// and is not meant to be folded into the 3-entry citizen allowlist above
-// (see CHANGE_PROPOSAL.md P0.4/P0.5). It gets its own rate limiter below
-// instead of a session check; mTLS-gating it at a gateway layer is tracked
-// as later, infrastructure-level work (P1/P3), out of scope here.
-const VERIFIER_PUBLIC_PREFIX = "/verify/";
+/** Deeper health check — actually reaches the peer, channel and chaincode. */
+app.get('/health/chain', async (_req, res) => {
+  try {
+    res.json(await pingChaincode());
+  } catch (err) {
+    res.status(503).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// ---- Stage 1 P0.4: deny-by-default authentication gate ----
+// A route is protected unless explicitly allowlisted here. Preserved exactly,
+// because the structural risk it fixes — a new route silently shipping public
+// because someone forgot to attach requireSession — is unchanged by the chain
+// migration.
+//
+// One entry is NEW relative to the EVM allowlist: POST /identity/did.
+// Registration must be reachable without a session, because a session is only
+// issued after a signed challenge against the public key the LEDGER holds for
+// a DID — which cannot exist before registration. The EVM stack did not need
+// this entry only because the browser wallet submitted that transaction
+// itself. Self-registration is still not unauthenticated in any meaningful
+// sense: the chaincode requires a proof-of-possession signature over the DID.
+const PUBLIC_PATHS = new Set([
+  '/health',
+  '/health/chain',
+  '/auth/challenge',
+  '/auth/verify',
+  '/identity/did',
+  '/transparency/stats',
+]);
+
+// `/verify/:did` is public by a deliberate, separate design decision — it
+// serves verifier ORGANIZATIONS, not citizen sessions. It gets its own rate
+// limiter rather than a session check; mTLS-gating it at the gateway layer
+// remains infrastructure-level work.
+const VERIFIER_PUBLIC_PREFIX = '/verify/';
 
 app.use((req, res, next) => {
-  if (CITIZEN_SESSION_ALLOWLIST.has(req.path) || req.path.startsWith(VERIFIER_PUBLIC_PREFIX)) {
+  if (PUBLIC_PATHS.has(req.path) || req.path.startsWith(VERIFIER_PUBLIC_PREFIX)) {
     return next();
   }
   return requireSession(req, res, next);
 });
 
-// ---- P0.5 / P1.1: basic rate limiting on /auth/challenge and /verify/:did ----
-// /auth/challenge: unauthenticated nonce issuance is a natural brute-force
-// target. /verify/:did: unauthenticated role-enumeration oracle that also
-// fans out on-chain calls per request — a free RPC-amplification vector.
-const authChallengeLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
-const verifyLimiter = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
+// ---- Stage 1 P0.5 / P1.1: rate limiting ----
+// /auth/challenge: unauthenticated nonce issuance is a brute-force target.
+// /verify: an unauthenticated role-enumeration oracle that fans out ledger
+// reads per request.
+// /identity/did: newly public, and it submits a real ledger transaction per
+// call, so it needs a tighter limit than either — without one it is a free
+// write-amplification vector against the ordering service.
+//
+// The test suite legitimately registers dozens of identities in seconds, which
+// these limits are designed to stop. Rather than raise the real limits to
+// accommodate tests -- which would weaken the running system to make a test
+// pass -- the limiter is skipped only under NODE_ENV=test. The double
+// condition is deliberate: RATE_LIMIT_DISABLED alone can never disable rate
+// limiting in a deployed environment, because NODE_ENV is not 'test' there.
+const rateLimitsDisabled = process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_DISABLED === 'true';
 
-app.use("/auth/challenge", authChallengeLimiter);
-app.use("/verify", verifyLimiter);
-
-app.use("/auth", authRouter);
-app.use("/identity", identityRouter);
-app.use("/credentials", credentialsRouter);
-app.use("/roles", rolesRouter);
-app.use("/assets", assetsRouter);
-app.use("/verify", verifyRouter);
-app.use("/recovery", recoveryRouter);
-app.use("/vault", vaultRouter);
-app.use("/audit", auditRouter);
-
-// P1.3: sanitized error handling — never return err.message (raw Postgres
-// constraint errors, upstream API bodies, file paths, etc.) to the caller.
-// The real error is logged server-side, tagged with a correlation ID that's
-// the only thing the client sees, so it can still be cross-referenced.
-export function errorHandler(err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) {
-  const correlationId = crypto.randomUUID();
-  console.error(`[${correlationId}]`, err);
-  res.status(500).json({ error: "Internal error. Contact support with this reference.", correlationId });
-}
-app.use(errorHandler);
-
-// P1.4: SAFE_LOCAL_MODE bypasses the hosted Safe Transaction Service and
-// executes Safe approvals directly with two local owner keys — a
-// local-demo-only substitute. Refuse to boot with it enabled against
-// anything but the local Hardhat chain (31337). Split out from startServer()
-// so it (and assertChainConfigured, in config.ts) can be unit-tested without
-// binding a real port.
-export function assertSafeLocalModeGuard() {
-  if (config.safeLocalMode && config.chainId !== 31337) {
-    throw new Error(
-      `SAFE_LOCAL_MODE=true is only valid with CHAIN_ID=31337 (local Hardhat). Got CHAIN_ID=${config.chainId}. Refusing to start.`
-    );
-  }
-}
-
-export function startServer() {
-  // P1.4: fail fast if contract addresses/keys are unset instead of booting
-  // "successfully" into a backend that will error on first real chain call.
-  assertChainConfigured();
-  assertSafeLocalModeGuard();
-
-  return app.listen(config.port, () => {
-    console.log(`TrustMesh backend listening on :${config.port}`);
-    startIndexerPolling();
+function limiter(max: number) {
+  return rateLimit({
+    windowMs: 60_000,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => rateLimitsDisabled,
   });
 }
 
+app.use('/auth/challenge', limiter(20));
+app.use('/verify', limiter(30));
+app.use('/identity/did', limiter(10));
+
+// TM-06: the citizen-facing endpoints above already had limits; these four
+// were missed. All four submit real ledger transactions (or, for vault
+// erase, destroy PII) and are Admin-gated, so the risk is a compromised or
+// malicious Admin session hammering the ordering service or spamming
+// destructive requests rather than an anonymous flood — the limits are set
+// higher than the citizen-facing ones accordingly, matching normal
+// legitimate admin-console usage.
+app.use('/governance', limiter(30));
+app.use('/roles', limiter(30));
+app.use('/assets/mint', limiter(10));
+app.use('/vault/erase', limiter(10));
+
+app.use('/auth', authRouter);
+app.use('/identity', identityRouter);
+app.use('/credentials', credentialsRouter);
+app.use('/roles', rolesRouter);
+app.use('/assets', assetsRouter);
+app.use('/governance', governanceRouter);
+app.use('/verify', verifyRouter);
+app.use('/recovery', recoveryRouter);
+// Session-scoped (not in PUBLIC_PATHS above), same deny-by-default gate as everything else.
+app.use('/notifications', notificationsRouter);
+// Untouched by this migration, as required: the vault and its DPDP
+// erasure-by-key-destruction logic are architecture-agnostic.
+app.use('/vault', vaultRouter);
+app.use('/audit', auditRouter);
+app.use('/transparency', transparencyRouter);
+
+// Stage 1 P1.3: sanitized errors — the real error is logged server-side with a
+// correlation id, and only that id reaches the client.
+export function errorHandler(
+  err: Error,
+  _req: express.Request,
+  res: express.Response,
+  _next: express.NextFunction
+) {
+  const correlationId = crypto.randomUUID();
+  console.error(`[${correlationId}]`, err);
+  res.status(500).json({ error: 'Internal error. Contact support with this reference.', correlationId });
+}
+app.use(errorHandler);
+
+/**
+ * Stage 1 P1.4 equivalent: fail fast on misconfiguration instead of booting
+ * "successfully" into a backend that errors on its first ledger call. Checks
+ * the MSP material actually exists rather than only that env vars are set.
+ */
+export function assertConfigured() {
+  assertFabricConfigured();
+  if (!fabricConfig.vcIssuerPrivateKey) {
+    throw new Error('VC_ISSUER_PRIVATE_KEY is not set — credential issuance would fail at runtime.');
+  }
+}
+
+export async function startServer() {
+  assertConfigured();
+  await pingChaincode();
+
+  // Last-resort net for rejections that originate outside a request — the
+  // event indexer's background stream, for instance. Without this, Node's
+  // default is to terminate, so a transient peer disconnect could take the API
+  // down even though the indexer already knows how to reconnect from its
+  // checkpoint. Logged loudly rather than swallowed silently.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+  });
+
+  const server = app.listen(config.port, () => {
+    console.log(`TrustMesh backend (Fabric) listening on :${config.port}`);
+    console.log(`  channel=${fabricConfig.channelName} chaincode=${fabricConfig.chaincodeName}`);
+    startIndexer();
+  });
+
+  const shutdown = async () => {
+    server.close();
+    await closeGateways();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  return server;
+}
+
 if (require.main === module) {
-  startServer();
+  startServer().catch((err) => {
+    console.error('Failed to start:', err.message);
+    process.exit(1);
+  });
 }

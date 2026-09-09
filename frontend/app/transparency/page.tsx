@@ -20,7 +20,7 @@ type Stats = {
  * Item 4 (public transparency dashboard). No session, no identity required —
  * this is the one page in the app anyone can load without an identity at
  * all. Backed by GET /transparency/stats (also public — see PUBLIC_PATHS in
- * backend/src/server.fabric.ts), which computes these numbers from live
+ * backend/src/server.ts), which computes these numbers from live
  * ledger/indexer state (backend/src/fabric/transparency.service.ts), never
  * from fabricated placeholders.
  */

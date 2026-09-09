@@ -1,0 +1,41 @@
+# Normalize text files in the repository to LF, and let Git decide what the
+# working copy looks like per platform.
+* text=auto
+
+# ---------------------------------------------------------------------------
+# Shell scripts MUST be checked out with LF, on every platform.
+#
+# Git stores these as LF, but a Windows clone with the default
+# core.autocrlf=true writes them out as CRLF. A shell script with CRLF endings
+# has a shebang of `#!/usr/bin/env bash\r`, and the kernel looks for an
+# interpreter literally named "bash\r" — which does not exist:
+#
+#     ./fabric/network-up.sh: /usr/bin/env: 'bash\r': No such file or directory
+#
+# That failure reads like a broken script rather than a line-ending problem, so
+# it costs an afternoon the first time someone hits it. It is not hypothetical
+# here: fabric/*.sh are the documented way to bring the network up, and the
+# README directs Windows users to run them under WSL2, which will not tolerate
+# CRLF at all.
+# ---------------------------------------------------------------------------
+*.sh text eol=lf
+
+# Same reasoning for anything else executed by an interpreter that reads a
+# shebang, and for files a container consumes verbatim.
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+docker-compose*.yml text eol=lf
+
+# SQL migrations are applied verbatim by node-pg-migrate; keep them stable
+# across platforms so a checkout on one machine cannot differ from another.
+*.sql text eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

@@ -15,7 +15,7 @@ export const identityRouter = Router();
  *   was: session-gated, no body; DID derived from req.walletAddress, because
  *        the frontend had already called DIDRegistry.registerDID() itself from
  *        the user's own wallet and this route only recorded the off-chain side.
- *   now: UNAUTHENTICATED (allowlisted in server.fabric.ts), body
+ *   now: UNAUTHENTICATED (allowlisted in server.ts), body
  *        { publicKey, signature }; this route submits the ledger registration.
  *
  * Why it must be unauthenticated: a session is only issued after a

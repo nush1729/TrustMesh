@@ -1,0 +1,20 @@
+# Rebuilt inside the image — copying the host's copy would both bloat the
+# build context and risk shipping native modules compiled for the wrong
+# platform.
+node_modules
+dist
+
+# Secrets. .env is gitignored but NOT dockerignored by default, and a stray
+# COPY would bake the vault master key and VC issuer key into an image layer
+# where they survive every later deletion.
+.env
+.env.*
+!.env.example
+
+# Never needed at runtime; excluded so a source edit does not bust the
+# dependency layer cache.
+test
+vitest.config.ts
+vitest.fabric.config.ts
+.fabric-checkpoint.json
+*.log

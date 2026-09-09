@@ -25,6 +25,28 @@ import { notifyRecoveryExecuted, notifyRecoveryProposed, notifyRecoveryVote } fr
  * forged. That is a structural improvement over the EVM design, not a port.
  */
 
+/// Minimum guardians before a recovery may be proposed at all.
+///
+/// The previous code relied on the threshold arithmetic producing an
+/// unreachable number for a single guardian: a lone guardian could open a
+/// recovery that could never execute. The protection was right — one guardian
+/// is one person able to unilaterally rebind a DID — but expressing it as an
+/// accident of rounding meant the caller got a request stuck at "pending"
+/// forever instead of a reason. This rejects the case explicitly.
+const MIN_GUARDIANS = 2;
+
+/// Strict majority: 2-of-3, 3-of-4, 3-of-5.
+///
+/// This previously read `Math.ceil(n / 2) + 1`, described in the comment as
+/// "majority-plus-one (e.g. 2-of-3, 3-of-4)". It is neither: for 3 guardians
+/// it yields 3, i.e. UNANIMITY, so one unreachable guardian deadlocked
+/// recovery permanently — the same brick failure mode guardian recovery
+/// exists to prevent. `floor(n / 2) + 1` is the strict majority the comment
+/// always described.
+export function recoveryThreshold(guardianCount: number): number {
+  return Math.floor(guardianCount / 2) + 1;
+}
+
 export async function addGuardian(didHash: string, guardianId: string) {
   await query(`INSERT INTO guardians (did_hash, guardian_address) VALUES ($1, $2)`, [didHash, guardianId]);
 }
@@ -39,21 +61,16 @@ export async function listGuardians(didHash: string): Promise<string[]> {
 
 export async function proposeRecovery(didHash: string, proposedBy: string, newControllerPublicKey: string) {
   const guardians = await listGuardians(didHash);
-  if (guardians.length === 0) {
-    throw new Error('No guardians registered for this DID — cannot propose recovery.');
+  if (guardians.length < MIN_GUARDIANS) {
+    throw new Error(
+      `Recovery needs at least ${MIN_GUARDIANS} registered guardians for this DID — found ${guardians.length}.`
+    );
   }
   if (!guardians.includes(proposedBy)) {
     throw new Error('Only a registered guardian may propose recovery.');
   }
 
-  // majority-plus-one (e.g. 2-of-3, 3-of-4). NOTE: with exactly one guardian
-  // this evaluates to 2, which no single-guardian vote count can ever reach —
-  // a lone guardian can propose but recovery can never execute. That is
-  // intentional (one guardian is one person able to unilaterally rebind the
-  // DID, the exact single-point-of-compromise this feature exists to avoid),
-  // but it means the UI/onboarding must steer users toward at least two
-  // guardians rather than silently accepting one.
-  const threshold = Math.ceil(guardians.length / 2) + 1;
+  const threshold = recoveryThreshold(guardians.length);
   const id = uuidv4();
   await query(
     `INSERT INTO recovery_requests (id, did_hash, proposed_by, new_controller, votes, threshold, status)

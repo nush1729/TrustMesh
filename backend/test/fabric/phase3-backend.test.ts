@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { app } from '../../src/server.fabric';
+import { app } from '../../src/server';
 import { closeGateways, pingChaincode } from '../../src/fabric/gateway';
 import { getController, registerUser } from '../../src/fabric/did.service';
 import { issueCredential, issuerDidFromPrivateKey, verifyCredentialJwt } from '../../src/fabric/vc.service';

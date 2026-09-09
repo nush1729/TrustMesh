@@ -3,7 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 // Importing the server also applies its `express-async-errors` patch, which is
 // global to express — that is what makes the probe router below behave.
-import { app, errorHandler } from '../../src/server.fabric';
+import { app, errorHandler } from '../../src/server';
 
 /**
  * REGRESSION TEST — an async route handler that throws must reach the error
@@ -18,7 +18,7 @@ import { app, errorHandler } from '../../src/server.fabric';
  * That made every async route in the API a remote crash vector: any input that
  * could provoke an unexpected throw would take down the whole service, not
  * just the one request. The fix is the `import 'express-async-errors'` at the
- * top of server.fabric.ts.
+ * top of server.ts.
  *
  * This test pins the behaviour so it cannot silently regress if that import is
  * ever removed or reordered below the route definitions (where it would have
