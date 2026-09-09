@@ -1,3 +1,24 @@
+-- BASELINE MIGRATION
+--
+-- This is backend/src/db/schema.sql, verbatim, captured as migration 0001 at
+-- the point the project adopted node-pg-migrate.
+--
+-- Why it is safe to run against a database that already has these tables:
+-- every statement is CREATE ... IF NOT EXISTS, which is exactly the property
+-- that made the old `npm run migrate` a silent no-op on an existing database.
+-- Here that property is used deliberately and once, so an existing deployment
+-- can adopt migration tracking without a dump/restore. Every change AFTER this
+-- one is a real ALTER in its own numbered file.
+--
+-- There is deliberately no Down Migration. Reversing this would drop the PII
+-- vault, the guardians and the erasure audit log — irreversible destruction of
+-- citizen data. `node-pg-migrate down` therefore fails loudly on this
+-- migration rather than quietly executing it.
+
+-- Up Migration
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";  -- gen_random_uuid()
+
 -- TrustMesh off-chain schema.
 -- Everything in this file is DELIBERATELY off-chain: it holds the
 -- human-readable role<->org mapping and any PII, both of which must stay

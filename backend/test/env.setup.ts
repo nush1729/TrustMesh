@@ -13,7 +13,7 @@ import * as path from 'path';
  */
 const defaults: Record<string, string> = {
   NODE_ENV: 'test',
-  // Only has any effect when NODE_ENV === 'test' — see server.fabric.ts.
+  // Only has any effect when NODE_ENV === 'test' — see server.ts.
   RATE_LIMIT_DISABLED: 'true',
   DATABASE_URL: 'postgres://localhost:5432/trustmesh',
   IPFS_API_URL: 'http://127.0.0.1:5001',

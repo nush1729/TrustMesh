@@ -18,7 +18,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['test/fabric/**/*.test.ts'],
-    setupFiles: ['test/fabric/env.setup.ts'],
+    setupFiles: ['test/env.setup.ts'],
     testTimeout: 120_000,
     hookTimeout: 180_000,
     fileParallelism: false,

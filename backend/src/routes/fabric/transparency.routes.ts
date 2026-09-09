@@ -3,7 +3,7 @@ import { computeTransparencyStats, TransparencyStats } from '../../fabric/transp
 
 /**
  * Item 4 (public transparency dashboard). PUBLIC, no session — see
- * PUBLIC_PATHS in server.fabric.ts. Backed by live ledger/indexer reads
+ * PUBLIC_PATHS in server.ts. Backed by live ledger/indexer reads
  * (transparency.service.ts), cached briefly so a burst of dashboard loads
  * doesn't fan out a full set of CouchDB rich queries + ledger reads per
  * request; real ledger state is never more than a few seconds stale.

@@ -1,5 +1,11 @@
+import * as crypto from "crypto";
 import { describe, it, expect } from "vitest";
-import { uploadJsonToIpfs, uploadFileToIpfs } from "../src/services/ipfs.service";
+import {
+  forgetContentCommitment,
+  uploadFileToIpfs,
+  uploadJsonToIpfs,
+  verifyContentCommitment,
+} from "../src/services/ipfs.service";
 
 /// P3.1: ipfs.service.ts was rewritten against a private, self-hosted Kubo
 /// node instead of the public Pinata SaaS. These tests require a local
@@ -42,5 +48,50 @@ describe("P3.1 — Kubo IPFS integration", () => {
     const b = await uploadJsonToIpfs({ x: 2 }, false);
     expect(a.cid).not.toBe(b.cid);
     expect(a.contentHash).not.toBe(b.contentHash);
+  });
+});
+
+describe("CRY-3 — the anchored commitment is salted, not a bare content hash", () => {
+  /**
+   * The property under test is not "the hash is correct" — it is that a bare
+   * hash of the content does NOT reproduce what gets anchored. That is what
+   * stops the ledger from being a permanent confirmation oracle: someone
+   * holding a candidate document must also hold the salt, which only Postgres
+   * has, to check it against the anchor.
+   */
+  it("cannot be reproduced by hashing the content alone", async () => {
+    const body = Buffer.from(`asset document ${Date.now()}`);
+    const { contentHash } = await uploadFileToIpfs(body, "doc.txt", false);
+
+    const bare = "0x" + crypto.createHash("sha256").update(body).digest("hex");
+    expect(contentHash).not.toBe(bare);
+    expect(contentHash).toMatch(/^0x[0-9a-f]{64}$/); // same shape, different value
+  });
+
+  it("verifies against the original bytes and rejects anything else", async () => {
+    const body = Buffer.from(`asset document ${Date.now()}`);
+    const { cid, contentHash } = await uploadFileToIpfs(body, "doc.txt", false);
+
+    expect(await verifyContentCommitment(cid, body, contentHash)).toEqual({ result: "match" });
+    expect(await verifyContentCommitment(cid, Buffer.from("a different document"), contentHash)).toEqual({
+      result: "mismatch",
+    });
+  });
+
+  it("becomes permanently unverifiable once the salt is destroyed", async () => {
+    const body = Buffer.from(`asset document ${Date.now()}`);
+    const { cid, contentHash } = await uploadFileToIpfs(body, "doc.txt", false);
+
+    // Precondition: it verifies while the salt still exists.
+    expect(await verifyContentCommitment(cid, body, contentHash)).toEqual({ result: "match" });
+
+    expect(await forgetContentCommitment(cid)).toEqual({ forgotten: true });
+
+    // THE DPDP PROPERTY. Even holding the exact original bytes and the exact
+    // commitment still on the ledger, the anchor can no longer be tied to the
+    // document. Before CRY-3 this assertion was impossible to make: a bare
+    // keccak256 anchor stayed checkable by anyone, forever, no matter what was
+    // deleted off-chain.
+    expect(await verifyContentCommitment(cid, body, contentHash)).toEqual({ result: "unverifiable" });
   });
 });

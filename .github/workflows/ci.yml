@@ -67,7 +67,28 @@ jobs:
   # script duplicating that logic. Verified by dry-running this exact command
   # sequence locally before adding it here.
   # ---------------------------------------------------------------------------
-  backend-evm:
+  # ---------------------------------------------------------------------------
+  # backend — SCOPED, deliberately. The full suite under test/fabric/**
+  # needs a live 3-org Hyperledger Fabric network
+  # (fabric/network-up.sh + fabric/deploy-chaincode.sh): real peers, orderer,
+  # 3 CAs, CouchDB, and generated MSP crypto material via
+  # fabric-samples/test-network. That is real Docker-in-Docker orchestration
+  # with multi-minute bring-up and channel/chaincode lifecycle steps, and it
+  # would need the fabric-samples repo (or an equivalent bring-up baked into
+  # this repo) available in the runner — heavy and, on shared GitHub-hosted
+  # runners, a real flakiness risk for governed multi-org endorsement flows.
+  #
+  # Rather than silently skip real coverage, this job runs everything that
+  # does NOT need the live network: a full type-check of the Fabric backend,
+  # and the one test file that is a pure regression test against the
+  # Express app object with no chain call in its path
+  # (test/fabric/async-error-handling.test.ts — verified locally to need only
+  # Postgres, confirmed by exercising this exact command before adding it
+  # here). The governed-flow tests under test/fabric/ are NOT run
+  # in CI; they are exercised locally against the live network per
+  # fabric/README.md and this PR's own manual verification.
+  # ---------------------------------------------------------------------------
+  backend:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -82,8 +103,8 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      # Real, self-hosted Kubo (Stage 1 P3.1) — the same image anyone would
-      # run in production, just ephemeral here. No public pinning service.
+      # Real, self-hosted Kubo (Stage 1 P3.1) — the same image anyone would run
+      # in production, just ephemeral here. No public pinning service.
       kubo:
         image: ipfs/kubo:latest
         ports: ["5001:5001"]
@@ -95,137 +116,6 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/trustmesh
       IPFS_API_URL: http://localhost:5001
-      AMOY_RPC_URL: http://127.0.0.1:8545
-      CHAIN_ID: "31337"
-      # Hardhat's standard, PUBLICLY KNOWN local test-account keys (printed by
-      # `npx hardhat node` itself) — not secrets, and worthless off this
-      # ephemeral chain. Account #5 = relayer, #1/#2 = the local Safe's two
-      # co-signers, matching backend/.env.example's documented local setup.
-      CHAIN_PRIVATE_KEY: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
-      SAFE_LOCAL_MODE: "true"
-      LOCAL_SAFE_OWNER1_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-      LOCAL_SAFE_OWNER2_KEY: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-          cache-dependency-path: |
-            contracts/package-lock.json
-            backend/package-lock.json
-
-      - name: Install contracts deps
-        working-directory: contracts
-        run: npm ci
-
-      - name: Start local Hardhat node
-        working-directory: contracts
-        run: |
-          npx hardhat node > /tmp/hardhat-node.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl -s -o /dev/null http://127.0.0.1:8545; then echo "Hardhat node is up"; exit 0; fi
-            sleep 1
-          done
-          echo "Hardhat node did not come up in time"; cat /tmp/hardhat-node.log; exit 1
-
-      - name: Deploy local Gnosis Safe
-        working-directory: contracts
-        run: npx hardhat run scripts/deployLocalSafe.ts --network localhost
-
-      - name: Deploy core contracts (against the local Safe)
-        working-directory: contracts
-        run: |
-          SAFE_ADDRESS=$(node -e "console.log(require('./local-safe.json').safeAddress)")
-          echo "GNOSIS_SAFE_ADDRESS=$SAFE_ADDRESS" >> "$GITHUB_ENV"
-          GNOSIS_SAFE_ADDRESS="$SAFE_ADDRESS" npx hardhat run scripts/deploy.ts --network localhost
-
-      - name: Wire up the local Safe (writer auth, recovery module, demo grant+mint)
-        working-directory: contracts
-        run: npx hardhat run scripts/localSafeSetup.ts --network localhost
-
-      - name: Export deployed contract addresses
-        working-directory: contracts
-        run: |
-          cat > /tmp/export-addresses.js <<'EOF'
-          // require() resolves relative to THIS file's own location (/tmp),
-          // not the shell's working directory — fs.readFileSync, unlike
-          // require, resolves relative paths against process.cwd(), which
-          // is `contracts/` here (see the working-directory: above).
-          const fs = require('fs');
-          const a = JSON.parse(fs.readFileSync('./deployed-addresses.json', 'utf8'));
-          const lines = [
-            `DID_REGISTRY_ADDRESS=${a.DIDRegistry}`,
-            `REVOCATION_REGISTRY_ADDRESS=${a.RevocationRegistry}`,
-            `ACCESS_CONTROL_REGISTRY_ADDRESS=${a.AccessControlRegistry}`,
-            `ASSET_NFT_ADDRESS=${a.AssetNFT}`,
-          ];
-          fs.appendFileSync(process.env.GITHUB_ENV, lines.join('\n') + '\n');
-          EOF
-          node /tmp/export-addresses.js
-
-      - name: Install backend deps
-        working-directory: backend
-        run: npm ci
-
-      - name: Apply schema
-        working-directory: backend
-        run: npm run migrate
-
-      - name: Type-check
-        working-directory: backend
-        run: npx tsc --noEmit
-
-      - name: EVM backend test suite
-        working-directory: backend
-        env:
-          # Dev-only symmetric keys, fixed and committed in plain sight
-          # deliberately: this Postgres instance is a fresh, throwaway
-          # ephemeral container destroyed at the end of the job, so there is
-          # no real PII or session ever at risk under this key. Not a secret,
-          # so no GitHub Actions secret is needed to run this workflow.
-          PII_VAULT_MASTER_KEY: "944141ad5b201da9aeffafdcc408039dc1b107d7993f33fed0ba9ba5388a703f"
-          SESSION_SECRET: "ci-dev-only-session-secret"
-        run: npm test
-
-  # ---------------------------------------------------------------------------
-  # backend (Fabric stack) — SCOPED, deliberately. The full suite under
-  # test/fabric/**/p0*/p1*/p3.1* needs a live 3-org Hyperledger Fabric network
-  # (fabric/network-up.sh + fabric/deploy-chaincode.sh): real peers, orderer,
-  # 3 CAs, CouchDB, and generated MSP crypto material via
-  # fabric-samples/test-network. That is real Docker-in-Docker orchestration
-  # with multi-minute bring-up and channel/chaincode lifecycle steps, and it
-  # would need the fabric-samples repo (or an equivalent bring-up baked into
-  # this repo) available in the runner — heavy and, on shared GitHub-hosted
-  # runners, a real flakiness risk for governed multi-org endorsement flows.
-  #
-  # Rather than silently skip real coverage, this job runs everything that
-  # does NOT need the live network: a full type-check of the Fabric backend,
-  # and the one Fabric test file that is a pure regression test against the
-  # Express app object with no chain call in its path
-  # (test/fabric/async-error-handling.test.ts — verified locally to need only
-  # Postgres, confirmed by exercising this exact command before adding it
-  # here). The P0/P1/P3.1 governed-flow tests under test/fabric/ are NOT run
-  # in CI; they are exercised locally against the live network per
-  # fabric/README.md and this PR's own manual verification.
-  # ---------------------------------------------------------------------------
-  backend-fabric-scoped:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: trustmesh
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/trustmesh
       NODE_ENV: test
       RATE_LIMIT_DISABLED: "true"
     steps:
@@ -238,12 +128,20 @@ jobs:
       - name: Install
         working-directory: backend
         run: npm ci
-      - name: Type-check (Fabric backend)
+      - name: Type-check
         working-directory: backend
         run: npx tsc --noEmit
       - name: Apply schema
         working-directory: backend
         run: npm run migrate
-      - name: Non-network Fabric regression test
+      # test/p0-authz.test.ts pins the P0.1/P0.2/P0.3 authorization guarantees
+      # and test/p3.1-ipfs-kubo.test.ts the Kubo integration. Both are
+      # deliberately free of any ledger dependency so they run on every push —
+      # unlike test/fabric/phase3-backend.test.ts, which needs the live 3-org
+      # network and is exercised locally instead.
+      - name: Tests (no live ledger required)
+        working-directory: backend
+        run: npm test
+      - name: Async-error regression test
         working-directory: backend
         run: npx vitest run --config vitest.fabric.config.ts test/fabric/async-error-handling.test.ts

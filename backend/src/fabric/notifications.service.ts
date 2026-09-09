@@ -8,7 +8,7 @@ import { query } from '../db/client';
  * new paid external dependency), so there is nowhere for these notifications
  * to actually get delivered as email or SMS. Instead, "sending" a
  * notification durably records it in Postgres (see the `notifications` table
- * in db/schema.sql) and it is surfaced to the recipient's own session via
+ * in the baseline migration) and it is surfaced to the recipient's own session via
  * `GET /notifications` — a bell/list UI (frontend/components/NotificationBell.tsx)
  * polls that endpoint.
  *

@@ -1,0 +1,120 @@
+# TrustMesh — supporting services.
+#
+#   docker compose up -d                      # Postgres + Kubo (what you normally want)
+#   docker compose --profile app up -d        # ...and the backend in a container too
+#   docker compose down                       # stop, keep data
+#   docker compose down -v                    # stop and DESTROY the database
+#
+# ---------------------------------------------------------------------------
+# WHY THE BACKEND IS BEHIND A PROFILE AND NOT ON BY DEFAULT
+# ---------------------------------------------------------------------------
+# Postgres and Kubo are self-contained: they work identically on any machine
+# with Docker, which is why they are the default and are all `npm test` needs.
+#
+# The backend is not self-contained. It reads Fabric MSP material from the
+# filesystem and dials three peers, so containerising it means mounting the
+# fabric-samples checkout AND joining the Docker network that test-network
+# created. That network's name varies between fabric-samples releases, so it is
+# a variable here rather than a guess baked into the file.
+#
+# Keeping it opt-in means the reliable path stays one command, and the path with
+# host-specific prerequisites announces itself instead of failing confusingly on
+# a first run.
+#
+# The Fabric network itself is deliberately NOT defined here. It is brought up by
+# ./fabric/network-up.sh using the official fabric-samples scripts — the
+# migration proposal's §9 is explicit that hand-rolled Fabric compose config is
+# where teams lose time, and duplicating those 11 containers here would be
+# exactly that mistake.
+
+name: trustmesh
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trustmesh
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trustmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The same image a real deployment would run, just ephemeral. A private,
+  # self-hosted node — never a public pinning service (see Stage 1 P3.1).
+  #
+  # Only the RPC API (5001) is published, and only to localhost. The swarm port
+  # is deliberately not exposed: this node has no business peering with the
+  # public IPFS network, and citizen documents must not be announced to it.
+  kubo:
+    image: ipfs/kubo:latest
+    ports:
+      - "127.0.0.1:5001:5001"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - kubo-data:/data/ipfs
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id > /dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    profiles: ["app"]
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kubo:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    environment:
+      # Service names, not localhost — inside the compose network these resolve
+      # to the containers above.
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/trustmesh
+      IPFS_API_URL: http://kubo:5001
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+
+      # Peers are reached by their container DNS names on the Fabric network,
+      # because `localhost` inside this container is this container. These
+      # override the localhost defaults in src/fabric/config.ts.
+      FABRIC_TEST_NETWORK_PATH: /fabric/test-network
+      FABRIC_ORG1_PEER_ENDPOINT: peer0.org1.example.com:7051
+      FABRIC_ORG2_PEER_ENDPOINT: peer0.org2.example.com:9051
+      FABRIC_ORG3_PEER_ENDPOINT: peer0.org3.example.com:11051
+
+      # No defaults on purpose. A vault master key or VC issuer key with a
+      # fallback value is a vault master key someone ships to production
+      # unchanged; compose fails loudly here instead.
+      PII_VAULT_MASTER_KEY: ${PII_VAULT_MASTER_KEY:?set PII_VAULT_MASTER_KEY (openssl rand -hex 32)}
+      VC_ISSUER_PRIVATE_KEY: ${VC_ISSUER_PRIVATE_KEY:?set VC_ISSUER_PRIVATE_KEY (openssl rand -hex 32)}
+    volumes:
+      # Read-only: the backend needs to READ MSP certs and keys, never write
+      # them, and this material is the identity of all three organizations.
+      - ${FABRIC_SAMPLES:-${HOME}/fabric/fabric-samples}/test-network:/fabric/test-network:ro
+      - backend-state:/app/state
+    networks:
+      - default
+      - fabric
+
+networks:
+  # The network test-network creates. Its name has changed between
+  # fabric-samples releases, so it is set here rather than assumed — check with
+  # `docker network ls | grep -i fabric` and set FABRIC_DOCKER_NETWORK if the
+  # default below is not what your checkout produced.
+  fabric:
+    external: true
+    name: ${FABRIC_DOCKER_NETWORK:-fabric_test}
+
+volumes:
+  postgres-data:
+  kubo-data:
+  backend-state:
