@@ -13,7 +13,7 @@ import {
 } from '../../src/fabric/governance.service';
 import { activeRolesFor, assetsByOwner, hasActiveRole } from '../../src/fabric/registry.service';
 import { getCachedAuditFeed, startIndexer, stopIndexer, waitForEvent } from '../../src/fabric/indexer.service';
-import { bootstrapRole, loginAs, newCitizen, registerCitizen, TestCitizen } from './helpers';
+import { MINIMAL_VALID_PDF, bootstrapRole, loginAs, newCitizen, registerCitizen, TestCitizen } from './helpers';
 
 /**
  * PHASE 3 VERIFICATION — every rewritten backend service exercised against the
@@ -324,9 +324,13 @@ describe('roles routes', () => {
       .post('/roles/grant')
       .send({ role: 'User', subject: citizen.didHash, expiry: Math.floor(Date.now() / 1000) + 3600 });
 
+    // V1 fix refinement: "no org affiliation" is an AUTHORIZATION failure —
+    // this caller is not entitled to approve anything at all — so it is a
+    // 403, distinct from the 400s the chaincode itself returns for a
+    // recognized-but-invalid governance action (see the tests above).
     const res = await unassignedAgent.post('/governance/approve').send({ proposalId: grant.body.proposalId });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/not provisioned/i);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/not provisioned|no organization affiliation/i);
   });
 });
 
@@ -339,7 +343,7 @@ describe('assets routes (governed mint over real IPFS)', () => {
       .post('/assets/mint')
       .field('to', owner.didHash)
       .field('encrypted', 'true')
-      .attach('file', Buffer.from('trustmesh phase 3 asset payload'), 'asset.txt');
+      .attach('file', MINIMAL_VALID_PDF, 'asset.pdf');
     expect(mint.status).toBe(200);
     expect(mint.body.ipfsCID).toBeTruthy();
 
@@ -382,7 +386,7 @@ describe('assets routes (governed mint over real IPFS)', () => {
       .post('/assets/mint')
       .field('to', owner.didHash)
       .field('encrypted', 'true')
-      .attach('file', Buffer.from('attack payload'), 'attack.txt');
+      .attach('file', MINIMAL_VALID_PDF, 'attack.pdf');
     expect(mint.status).toBe(200);
     const { proposalId } = mint.body as { proposalId: string };
 
@@ -412,7 +416,7 @@ describe('assets routes (governed mint over real IPFS)', () => {
       .post('/assets/mint')
       .field('to', from.didHash)
       .field('encrypted', 'true')
-      .attach('file', Buffer.from('transferable asset'), 'asset2.txt');
+      .attach('file', MINIMAL_VALID_PDF, 'asset2.pdf');
     await admin2Agent.post('/governance/approve').send({ proposalId: mint.body.proposalId });
     await adminAgent.post('/governance/execute').send({ proposalId: mint.body.proposalId });
 

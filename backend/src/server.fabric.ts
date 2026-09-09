@@ -160,12 +160,24 @@ app.use('/transparency', transparencyRouter);
 
 // Stage 1 P1.3: sanitized errors — the real error is logged server-side with a
 // correlation id, and only that id reaches the client.
+//
+// V7 fix: an oversized upload to /assets/mint used to fall all the way
+// through to this handler's generic 500 — multer's own LIMIT_FILE_SIZE error
+// is a normal, expected client-input problem (the caller sent a file bigger
+// than the 10MB cap), not an internal error, and deserves a proper 413 with
+// a message that actually says so rather than a correlation id to "contact
+// support" about. Checked by `err.code`, which is how multer's own
+// MulterError already identifies itself, rather than by `instanceof` so this
+// keeps working regardless of which multer instance/require path threw it.
 export function errorHandler(
-  err: Error,
+  err: Error & { code?: string },
   _req: express.Request,
   res: express.Response,
   _next: express.NextFunction
 ) {
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'Uploaded file exceeds the 10MB size limit.' });
+  }
   const correlationId = crypto.randomUUID();
   console.error(`[${correlationId}]`, err);
   res.status(500).json({ error: 'Internal error. Contact support with this reference.', correlationId });

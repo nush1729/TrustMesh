@@ -7,6 +7,25 @@ import { proposeApproveExecute } from '../../src/fabric/governance.service';
 import { assignOrgToDid } from '../../src/fabric/org-membership.service';
 
 /**
+ * V3 fix regression support: POST /assets/mint now sniffs actual file
+ * content against a magic-byte allowlist (see fabric/file-type.service.ts),
+ * so tests that need a mint to SUCCEED can no longer attach arbitrary text
+ * content — it must be bytes that genuinely match an allowed type. This is a
+ * minimal-but-real, well-formed single-page PDF (not just a `%PDF-` prefix)
+ * so it passes the same sniffing a real institutional document would.
+ */
+export const MINIMAL_VALID_PDF = Buffer.from(
+  '%PDF-1.4\n' +
+    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
+    '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n' +
+    'xref\n0 4\n0000000000 65535 f \n' +
+    'trailer<</Size 4/Root 1 0 R>>\n' +
+    'startxref\n0\n%%EOF',
+  'utf8'
+);
+
+/**
  * Test helpers for the Fabric stack.
  *
  * A "citizen" here is exactly what the browser will hold under the §4 WebCrypto

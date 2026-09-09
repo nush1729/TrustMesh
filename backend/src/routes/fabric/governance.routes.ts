@@ -8,7 +8,7 @@ import {
   getProposal,
   listPendingProposals,
 } from '../../fabric/governance.service';
-import { getOrgForDidHash } from '../../fabric/org-membership.service';
+import { getOrgForDidHash, NoOrgAffiliationError } from '../../fabric/org-membership.service';
 
 export const governanceRouter = Router();
 
@@ -76,8 +76,18 @@ governanceRouter.get('/:proposalId', async (req, res) => {
 governanceRouter.post('/approve', requireRole('Admin'), async (req: AuthedRequest, res) => {
   const { proposalId } = req.body as { proposalId?: string };
   if (!proposalId) return res.status(400).json({ error: 'proposalId required.' });
+
+  let org;
   try {
-    const org = await getOrgForDidHash(req.didHash!);
+    org = await getOrgForDidHash(req.didHash!);
+  } catch (err) {
+    if (err instanceof NoOrgAffiliationError) {
+      return res.status(403).json({ error: err.message });
+    }
+    return res.status(400).json({ error: (err as Error).message });
+  }
+
+  try {
     res.json(await approveProposal(proposalId, org));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });

@@ -28,6 +28,15 @@ import { OrgKey, ORG_KEYS } from './config';
  * single identity choose which distinct MSP ID to submit as.
  */
 
+/**
+ * Distinguishes "this DID has no recorded org affiliation" (an authorization
+ * problem — the caller isn't entitled to approve anything at all, a 403) from
+ * every other failure in this module (a 400/500). governance.routes.ts checks
+ * for this class specifically so the two don't collapse into the same status
+ * code.
+ */
+export class NoOrgAffiliationError extends Error {}
+
 export async function getOrgForDidHash(didHash: string): Promise<OrgKey> {
   const rows = await query<{ org_key: OrgKey }>(
     `SELECT org_key FROM org_admins WHERE did_hash = $1`,
@@ -35,8 +44,9 @@ export async function getOrgForDidHash(didHash: string): Promise<OrgKey> {
   );
   const row = rows[0];
   if (!row) {
-    throw new Error(
-      'This identity is not provisioned as any organization\'s governance representative — cannot approve or execute proposals.'
+    throw new NoOrgAffiliationError(
+      'This identity is not provisioned with an organization affiliation — no organization affiliation assigned. ' +
+        'Contact an existing admin to assign one via fabric/bootstrap.ts.'
     );
   }
   return row.org_key;

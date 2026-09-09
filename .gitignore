@@ -25,3 +25,7 @@ frontend/next-env.d.ts
 chaincode/trustmesh/dist
 chaincode/trustmesh/dist-test
 backend/.fabric-checkpoint.json
+
+# V1 fix: throwaway local-dev identities (private keys included) generated
+# by fabric/tools/bootstrap-org-admins.sh — never commit these.
+fabric/tools/generated/
