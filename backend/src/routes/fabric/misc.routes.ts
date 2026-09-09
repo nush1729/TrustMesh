@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as crypto from 'crypto';
-import { AuthedRequest, requireRole } from '../../fabric/auth.middleware';
+import { AuthedRequest, requireAnyRole, requireRole } from '../../fabric/auth.middleware';
 import { getUserByDidHash } from '../../fabric/did.service';
 import { getCachedAuditFeed } from '../../fabric/indexer.service';
 import { proposeAction } from '../../fabric/governance.service';
@@ -24,8 +24,16 @@ export const auditRouter = Router();
  *
  * Governed events now additionally carry who proposed and who approved, which
  * the EVM feed could not show: Safe approvals happened in a separate system.
+ *
+ * Overnight pass fix: this route previously only sat behind the global
+ * deny-by-default session gate (server.fabric.ts) with NO role check at all —
+ * any authenticated citizen, including a plain User, could read the entire
+ * platform's audit feed. PS 26125 defines a dedicated Auditor role for
+ * exactly this purpose, so restrict to Admin/Auditor, matching the RBAC
+ * model's intent (and the same Admin/Auditor pairing already used by
+ * GET /assets/:assetId/document).
  */
-auditRouter.get('/feed', async (_req, res) => {
+auditRouter.get('/feed', requireAnyRole(['Admin', 'Auditor']), async (_req, res) => {
   res.json({ events: getCachedAuditFeed() });
 });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, AuditEvent } from '@/lib/api';
+import { api, ApiError, AuditEvent } from '@/lib/api';
 
 const TYPE_LABELS: Record<AuditEvent['type'], string> = {
   DID_REGISTERED: 'DID Registered',
@@ -19,6 +19,12 @@ export function AuditFeed() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Overnight-pass fix: /audit/feed now requires an active Admin or Auditor
+  // role (item 1). A 403 here is an expected, permanent outcome for a plain
+  // User — show a clear access-required message instead of a generic error
+  // banner, and stop the 10s poll rather than repeatedly re-requesting
+  // something that will never succeed for this session.
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,17 +32,35 @@ export function AuditFeed() {
       api
         .auditFeed()
         .then((res) => !cancelled && setEvents(res.events))
-        .catch((e) => !cancelled && setError(e.message))
+        .catch((e) => {
+          if (cancelled) return;
+          if (e instanceof ApiError && e.status === 403) {
+            setForbidden(true);
+            clearInterval(timer);
+          } else {
+            setError(e.message);
+          }
+        })
         .finally(() => !cancelled && setLoading(false));
     load();
-    const t = setInterval(load, 10_000);
+    const timer = setInterval(load, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      clearInterval(timer);
     };
   }, []);
 
   if (loading) return <p className="text-sm text-mist">Loading audit feed…</p>;
+  if (forbidden)
+    return (
+      <div className="rounded-xl border border-white/10 bg-ink-800 px-4 py-6 text-center">
+        <p className="text-sm font-semibold text-white">Auditor or Admin access required</p>
+        <p className="mt-1 text-xs text-mist">
+          The audit trail is restricted to accounts holding an active Admin or Auditor role. Contact an
+          administrator if you believe you should have access.
+        </p>
+      </div>
+    );
   if (error) return <p className="text-sm text-red-400">Could not load audit feed: {error}</p>;
   if (events.length === 0) return <p className="text-sm text-mist">No events yet.</p>;
 

@@ -18,6 +18,21 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:400
  *                             Safe web UI
  */
 
+/**
+ * Carries the HTTP status alongside the backend's error message so callers
+ * can branch on it (e.g. showing a dedicated "access required" state for a
+ * 403 rather than a generic error banner) without re-parsing the message.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...options,
@@ -32,7 +47,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(message);
+    throw new ApiError(message, res.status);
   }
   return res.json() as Promise<T>;
 }

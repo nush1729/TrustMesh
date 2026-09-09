@@ -83,15 +83,15 @@ Response: `{ "proposalId": "...", "status": "PENDING", "approvals": 1 }`
 Request: `{ "role": "Manager", "subject": "<did hash>" }`
 Response: `{ "proposalId": "...", "status": "PENDING", "approvals": 1 }`
 
-### `GET /roles/status/:proposalId`
+### `GET /roles/status/:proposalId` — session required
 Response: current proposal state (see `/governance/:proposalId` below — same shape).
 
-### `GET /roles/subject/:didHash`
+### `GET /roles/subject/:didHash` — session required
 Every role currently held by an identity (CouchDB rich query — not possible
 against the EVM contracts, which had no indexed reverse lookup).
 Response: `{ "roles": [{ "role": "Admin", "expiry": 1735689600, ... }] }`
 
-### `GET /roles/holders/:role`
+### `GET /roles/holders/:role` — session required
 Everyone currently holding `:role` (`Admin`/`Manager`/`Auditor`/`User`) — the
 admin console's roster view.
 Response: `{ "holders": ["<did hash>", ...] }`
@@ -108,13 +108,13 @@ mint/transfer, credential revocation, controller rotation — goes through this
 propose → approve → execute lifecycle, requiring 2 of the 3 governance
 organizations.
 
-### `GET /governance/pending`
+### `GET /governance/pending` — session required
 Response: `{ "proposals": [{ "proposalId": "...", "actionType": "GRANT_ROLE", "proposer": "...", "approvals": ["Org1MSP"], "payload": {...}, "createdAt": "..." }, ...] }`
 
-### `GET /governance/signers`
+### `GET /governance/signers` — session required
 Response: `{ "threshold": 2, "organizations": [{ "org": "org1", "mspId": "Org1MSP", "role": "IssuingDept" }, { "org": "org2", "mspId": "Org2MSP", "role": "AuditOrg" }, { "org": "org3", "mspId": "Org3MSP", "role": "IndependentVerifier" }] }`
 
-### `GET /governance/:proposalId`
+### `GET /governance/:proposalId` — session required
 Response: full proposal record including approval trail and final status
 (`PENDING` / `EXECUTED` / `CANCELLED`).
 
@@ -203,12 +203,12 @@ Response: `{ "proposalId": "...", "status": "PENDING", "ipfsCID": "Qm...", "cont
 Request: `{ "from": "<did hash>", "to": "<did hash>", "assetId": "12" }`
 Response: `{ "proposalId": "...", "status": "PENDING" }`
 
-### `GET /assets/status/:proposalId`
-### `GET /assets/owner/:didHash`
+### `GET /assets/status/:proposalId` — session required
+### `GET /assets/owner/:didHash` — session required
 Response: `{ "assets": [{ "assetId": "12", "ipfsCID": "Qm...", "contentHash": "0x...", "owner": "...", "mintedAt": "..." }] }`
 
-### `GET /assets/:assetId`
-### `GET /assets/:assetId/history`
+### `GET /assets/:assetId` — session required
+### `GET /assets/:assetId/history` — session required
 Immutable custody provenance straight from the ledger's key history.
 Response: `{ "history": [{ "owner": "...", "at": "..." }, ...] }`
 
@@ -277,7 +277,7 @@ untouched.
 
 ## Audit
 
-### `GET /audit/feed`
+### `GET /audit/feed` — session + Admin or Auditor role required
 Response: `{ "events": [{ "id": "...", "type": "ASSET_MINTED", "actor": "...", "target": "...", "approvedBy": ["Org1MSP", "Org2MSP"], "timestamp": "...", "block": 372, "txId": "..." }] }`
 Served from the durable, checkpointed event indexer
 (`backend/src/fabric/indexer.service.ts`), not replayed per request. PII-free
@@ -285,6 +285,29 @@ by construction — the chain never stores PII in the first place. Unlike the
 EVM feed, governed events additionally show **who proposed and who
 approved** each action (Safe approvals happened in a separate system the EVM
 indexer had no visibility into).
+
+**Overnight-pass fix**: this endpoint previously sat behind only the global
+session gate, with no role check — any authenticated citizen could read the
+entire platform's audit feed. PS 26125 defines a dedicated Auditor role for
+this purpose, so access is now restricted to an active on-ledger **Admin**
+or **Auditor** role (`requireAnyRole(['Admin', 'Auditor'])` in
+`backend/src/fabric/auth.middleware.ts`), matching the same Admin/Auditor
+pairing already used by `GET /assets/:assetId/document`. A plain User gets
+`403`.
+
+---
+
+## Notifications
+
+### `GET /notifications` — session required
+Response: `{ "notifications": [{ "id": "...", "type": "RECOVERY_PROPOSED" | "RECOVERY_VOTE" | "RECOVERY_EXECUTED" | "NEW_DEVICE_LOGIN", "channel": "...", "subject": "...", "body": "...", "read_at": "..." | null, "created_at": "..." }] }`
+Scoped strictly to the caller's own `didHash`, derived from the session —
+never from a query param or body field, so one user cannot read another's
+notification feed by guessing a DID hash. Mocked channel
+(`backend/src/fabric/notifications.service.ts`).
+
+### `POST /notifications/read` — session required
+Marks all of the caller's own notifications read. Response: `{ "ok": true }`.
 
 ---
 
