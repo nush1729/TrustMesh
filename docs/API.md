@@ -83,15 +83,15 @@ Response: `{ "proposalId": "...", "status": "PENDING", "approvals": 1 }`
 Request: `{ "role": "Manager", "subject": "<did hash>" }`
 Response: `{ "proposalId": "...", "status": "PENDING", "approvals": 1 }`
 
-### `GET /roles/status/:proposalId`
+### `GET /roles/status/:proposalId` — session required
 Response: current proposal state (see `/governance/:proposalId` below — same shape).
 
-### `GET /roles/subject/:didHash`
+### `GET /roles/subject/:didHash` — session required
 Every role currently held by an identity (CouchDB rich query — not possible
 against the EVM contracts, which had no indexed reverse lookup).
 Response: `{ "roles": [{ "role": "Admin", "expiry": 1735689600, ... }] }`
 
-### `GET /roles/holders/:role`
+### `GET /roles/holders/:role` — session required
 Everyone currently holding `:role` (`Admin`/`Manager`/`Auditor`/`User`) — the
 admin console's roster view.
 Response: `{ "holders": ["<did hash>", ...] }`
@@ -108,13 +108,13 @@ mint/transfer, credential revocation, controller rotation — goes through this
 propose → approve → execute lifecycle, requiring 2 of the 3 governance
 organizations.
 
-### `GET /governance/pending`
+### `GET /governance/pending` — session required
 Response: `{ "proposals": [{ "proposalId": "...", "actionType": "GRANT_ROLE", "proposer": "...", "approvals": ["Org1MSP"], "payload": {...}, "createdAt": "..." }, ...] }`
 
-### `GET /governance/signers`
+### `GET /governance/signers` — session required
 Response: `{ "threshold": 2, "organizations": [{ "org": "org1", "mspId": "Org1MSP", "role": "IssuingDept" }, { "org": "org2", "mspId": "Org2MSP", "role": "AuditOrg" }, { "org": "org3", "mspId": "Org3MSP", "role": "IndependentVerifier" }] }`
 
-### `GET /governance/:proposalId`
+### `GET /governance/:proposalId` — session required
 Response: full proposal record including approval trail and final status
 (`PENDING` / `EXECUTED` / `CANCELLED`).
 
@@ -203,12 +203,12 @@ Response: `{ "proposalId": "...", "status": "PENDING", "ipfsCID": "Qm...", "cont
 Request: `{ "from": "<did hash>", "to": "<did hash>", "assetId": "12" }`
 Response: `{ "proposalId": "...", "status": "PENDING" }`
 
-### `GET /assets/status/:proposalId`
-### `GET /assets/owner/:didHash`
+### `GET /assets/status/:proposalId` — session required
+### `GET /assets/owner/:didHash` — session required
 Response: `{ "assets": [{ "assetId": "12", "ipfsCID": "Qm...", "contentHash": "0x...", "owner": "...", "mintedAt": "..." }] }`
 
-### `GET /assets/:assetId`
-### `GET /assets/:assetId/history`
+### `GET /assets/:assetId` — session required
+### `GET /assets/:assetId/history` — session required
 Immutable custody provenance straight from the ledger's key history.
 Response: `{ "history": [{ "owner": "...", "at": "..." }, ...] }`
 
