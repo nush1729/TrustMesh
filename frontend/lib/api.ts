@@ -127,10 +127,13 @@ export const api = {
     ),
 
   // --- assets -------------------------------------------------------------------
-  mintAsset: (to: string, file: File) => {
+  // TM-05: `encrypted` is required (no default) — the backend now rejects an
+  // upload that doesn't explicitly declare it.
+  mintAsset: (to: string, file: File, encrypted: boolean) => {
     const formData = new FormData();
     formData.append('to', to);
     formData.append('file', file);
+    formData.append('encrypted', String(encrypted));
     return fetch(`${BACKEND_URL}/assets/mint`, { method: 'POST', body: formData, credentials: 'include' }).then(
       async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `${r.status}`);

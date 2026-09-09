@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { ethers } from "ethers";
 import { accessControlRegistry, ROLE_NAME_TO_HASH } from "../services/chain.service";
+import { isDidKey } from "../fabric/identity";
+import { getUserByDidHash } from "../services/did.service";
 
 export const verifyRouter = Router();
 
@@ -11,6 +13,21 @@ export const verifyRouter = Router();
 /// vault.service).
 verifyRouter.get("/:did", async (req, res) => {
   const did = decodeURIComponent(req.params.did);
+
+  // BRIDGE NOTE: did:key identities (see routes/identity.routes.ts) have no
+  // EVM address and are anchored off-chain only in this bridge — there is no
+  // on-chain role/ownership state to check for one. Answer from the
+  // off-chain `users` table instead of 400ing, so the frontend's
+  // "is this DID registered?" check (identity-context.tsx's refresh()) works
+  // for the identity model this backend actually issues. Roles/assets are
+  // honestly reported empty rather than guessed at.
+  if (isDidKey(did)) {
+    const { didToHash } = await import("../fabric/identity");
+    const user = await getUserByDidHash(didToHash(did));
+    if (!user) return res.status(404).json({ error: "DID not registered." });
+    return res.json({ did, address: null, roles: [], assets: [], credentialsValid: true });
+  }
+
   const addressMatch = did.match(/0x[a-fA-F0-9]{40}/);
   if (!addressMatch) return res.status(400).json({ error: "did must contain a resolvable 0x address (did:ethr:...)." });
   const address = ethers.getAddress(addressMatch[0]);

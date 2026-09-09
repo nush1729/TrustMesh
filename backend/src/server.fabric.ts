@@ -130,6 +130,18 @@ app.use('/auth/challenge', limiter(20));
 app.use('/verify', limiter(30));
 app.use('/identity/did', limiter(10));
 
+// TM-06: the citizen-facing endpoints above already had limits; these four
+// were missed. All four submit real ledger transactions (or, for vault
+// erase, destroy PII) and are Admin-gated, so the risk is a compromised or
+// malicious Admin session hammering the ordering service or spamming
+// destructive requests rather than an anonymous flood — the limits are set
+// higher than the citizen-facing ones accordingly, matching normal
+// legitimate admin-console usage.
+app.use('/governance', limiter(30));
+app.use('/roles', limiter(30));
+app.use('/assets/mint', limiter(10));
+app.use('/vault/erase', limiter(10));
+
 app.use('/auth', authRouter);
 app.use('/identity', identityRouter);
 app.use('/credentials', credentialsRouter);

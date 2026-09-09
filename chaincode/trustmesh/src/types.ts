@@ -140,6 +140,8 @@ export interface ProposalRecord {
   proposedBy: string;
   proposedByMsp: string;
   proposedAt: string;
+  /** TM-08: ISO timestamp after which this proposal can no longer be approved or executed. */
+  expiresAt: string;
   threshold: number;
   approvals: Approval[];
   status: ProposalStatus;

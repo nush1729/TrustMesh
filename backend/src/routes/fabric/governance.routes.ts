@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { OrgKey, ORG_KEYS, fabricConfig } from '../../fabric/config';
+import { ORG_KEYS, fabricConfig } from '../../fabric/config';
 import { AuthedRequest, requireRole } from '../../fabric/auth.middleware';
 import {
   approveProposal,
@@ -8,6 +8,7 @@ import {
   getProposal,
   listPendingProposals,
 } from '../../fabric/governance.service';
+import { getOrgForDidHash } from '../../fabric/org-membership.service';
 
 export const governanceRouter = Router();
 
@@ -25,14 +26,6 @@ export const governanceRouter = Router();
  * Approvals remain individually attributable: the chaincode records the
  * approving organization's MSP ID and the signing certificate's CN.
  */
-
-function parseOrg(value: unknown): OrgKey {
-  const key = String(value ?? '') as OrgKey;
-  if (!ORG_KEYS.includes(key)) {
-    throw new Error(`org must be one of: ${ORG_KEYS.join(', ')}`);
-  }
-  return key;
-}
 
 /** The approval queue — pending proposals awaiting a second organization. */
 governanceRouter.get('/pending', async (_req, res) => {
@@ -62,16 +55,30 @@ governanceRouter.get('/:proposalId', async (req, res) => {
 /**
  * One organization's approval.
  *
- * `org` selects which organization's MSP identity signs. In production each
- * organization runs its own backend holding only its own identity and this
- * parameter does not exist; the prototype colocates all three so the full
- * 2-of-3 flow is demonstrable on one machine (see fabric/config.ts).
+ * SECURITY (TM-01 fix): the organization that signs this approval is NEVER
+ * accepted from the request body. The backend colocates all three
+ * organizations' Fabric MSP identities in one process (a documented
+ * single-machine demo affordance — see fabric/config.ts), which used to mean
+ * a client-supplied `org` field let any single Admin session pick a second
+ * organization for itself and satisfy the whole 2-of-3 quorum alone.
+ *
+ * The organization is now looked up server-side from a fact recorded when
+ * this Admin was provisioned (see fabric/org-membership.service.ts) — an
+ * Admin can only ever approve as the ONE organization they were actually
+ * assigned to represent. A different, real human holding a different
+ * organization's Admin credential is now structurally required for the
+ * second approval, exactly as the governance model claims.
+ *
+ * In production each organization would run its own backend holding only its
+ * own identity, and no `org` selection would exist at all; this fixes the
+ * single-process prototype to behave equivalently until that split happens.
  */
 governanceRouter.post('/approve', requireRole('Admin'), async (req: AuthedRequest, res) => {
-  const { proposalId, org } = req.body as { proposalId?: string; org?: string };
+  const { proposalId } = req.body as { proposalId?: string };
   if (!proposalId) return res.status(400).json({ error: 'proposalId required.' });
   try {
-    res.json(await approveProposal(proposalId, parseOrg(org)));
+    const org = await getOrgForDidHash(req.didHash!);
+    res.json(await approveProposal(proposalId, org));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

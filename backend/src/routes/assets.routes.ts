@@ -19,15 +19,21 @@ assetsRouter.post(
   requireRole("Admin"),
   upload.single("file"),
   async (req: AuthedRequest, res) => {
-    const { to } = req.body as { to?: string };
+    const { to, encrypted } = req.body as { to?: string; encrypted?: string };
     const file = req.file;
     if (!to || !file) return res.status(400).json({ error: "to (address) and file are required." });
 
-    // NOTE: if this document contains PII, encrypt it via vault.service
-    // BEFORE calling uploadFileToIpfs — IPFS content is public and
-    // effectively permanent. Non-PII asset documents (equipment specs,
-    // certificate templates) can go straight to IPFS as here.
-    const { cid, contentHash } = await uploadFileToIpfs(file.buffer, file.originalname);
+    // TM-05 fix: caller must explicitly declare whether this file is
+    // pre-encrypted, or explicitly confirm it contains no PII — IPFS content
+    // is public and effectively permanent, so silence is no longer treated
+    // as "safe to upload as plaintext".
+    if (encrypted !== "true" && encrypted !== "false") {
+      return res.status(400).json({
+        error:
+          'encrypted ("true" or "false") is required: state whether this file is pre-encrypted, or explicitly confirm it contains no PII.',
+      });
+    }
+    const { cid, contentHash } = await uploadFileToIpfs(file.buffer, file.originalname, encrypted === "true");
 
     const data = assetNFTIface.encodeFunctionData("mintAsset", [to, cid, contentHash]);
     const { safeTxHash } = await proposeSafeTransaction(config.contracts.assetNFT, data);

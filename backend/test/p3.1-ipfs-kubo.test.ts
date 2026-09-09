@@ -10,7 +10,8 @@ import { uploadJsonToIpfs, uploadFileToIpfs } from "../src/services/ipfs.service
 describe("P3.1 — Kubo IPFS integration", () => {
   it("uploads JSON and returns a real CID plus a matching content hash", async () => {
     const data = { assetType: "equipment-spec", label: `test-${Date.now()}` };
-    const { cid, contentHash } = await uploadJsonToIpfs(data);
+    // TM-05: encrypted/PII-free is now a required, explicit declaration.
+    const { cid, contentHash } = await uploadJsonToIpfs(data, false);
 
     expect(cid).toMatch(/^Qm|^bafy/); // CIDv0 or CIDv1
     expect(contentHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -25,7 +26,7 @@ describe("P3.1 — Kubo IPFS integration", () => {
 
   it("uploads a raw file buffer and returns a CID whose content round-trips", async () => {
     const fileContent = Buffer.from(`sample asset document ${Date.now()}`);
-    const { cid, contentHash } = await uploadFileToIpfs(fileContent, "spec.txt");
+    const { cid, contentHash } = await uploadFileToIpfs(fileContent, "spec.txt", false);
 
     expect(cid).toMatch(/^Qm|^bafy/);
     expect(contentHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -37,8 +38,8 @@ describe("P3.1 — Kubo IPFS integration", () => {
   });
 
   it("two different files produce two different CIDs and content hashes", async () => {
-    const a = await uploadJsonToIpfs({ x: 1 });
-    const b = await uploadJsonToIpfs({ x: 2 });
+    const a = await uploadJsonToIpfs({ x: 1 }, false);
+    const b = await uploadJsonToIpfs({ x: 2 }, false);
     expect(a.cid).not.toBe(b.cid);
     expect(a.contentHash).not.toBe(b.contentHash);
   });

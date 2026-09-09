@@ -202,7 +202,7 @@ export function LoginPrompt() {
 
 /** Compact identity status + actions for the navbar. Replaces <ConnectButton />. */
 export function IdentityButton() {
-  const { identity, registered, session, login, register, logout, loading } = useIdentity();
+  const { identity, registered, session, login, register, logout, forget, loading } = useIdentity();
   const [open, setOpen] = useState(false);
 
   if (loading && !identity) return <span className="text-xs text-mist">…</span>;
@@ -251,6 +251,21 @@ export function IdentityButton() {
                 Sign out
               </button>
             )}
+            {/* Sign out only ends the session — the keypair itself stays on
+                this device (that's the point: it's self-sovereign, not
+                admin-revocable). This is the deliberate, explicit way to
+                actually drop it and start over with a new identity. */}
+            <button
+              onClick={() => {
+                if (confirm('Forget this identity on this device? This cannot be undone — there is no backup unless you made one.')) {
+                  forget();
+                  setOpen(false);
+                }
+              }}
+              className="rounded border border-red-500/30 px-3 py-1 text-xs text-red-400 hover:bg-red-500/10"
+            >
+              Forget this device
+            </button>
           </div>
         </div>
       )}
