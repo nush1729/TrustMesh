@@ -324,9 +324,13 @@ describe('roles routes', () => {
       .post('/roles/grant')
       .send({ role: 'User', subject: citizen.didHash, expiry: Math.floor(Date.now() / 1000) + 3600 });
 
+    // V1 fix refinement: "no org affiliation" is an AUTHORIZATION failure —
+    // this caller is not entitled to approve anything at all — so it is a
+    // 403, distinct from the 400s the chaincode itself returns for a
+    // recognized-but-invalid governance action (see the tests above).
     const res = await unassignedAgent.post('/governance/approve').send({ proposalId: grant.body.proposalId });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/not provisioned/i);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/not provisioned|no organization affiliation/i);
   });
 });
 
